@@ -1,0 +1,32 @@
+{
+  "compatibility": "Unreleased Scene/Viewport, input, headless and native-resolution snapshot-route guidance; inspect active source or installed headers for version-sensitive APIs. Standalone package validation is deferred until a matching Bitloop release is published.",
+  "files": {
+    "SKILL.md": "1d6cb6abdeb25052a0358579a536d3766c544bd3f1be9f18415cca1a0a3b9182",
+    "agents/openai.yaml": "3731688d06e3e9931c9434b59de2e83507e6d0f7fa7395cc949d836819205e38",
+    "assets/health_probe_support.hpp": "ea4f43576865133063551ae1ecea6a1dcec15b05261423065f5a94056ccd2674",
+    "references/advanced-project-workflow.md": "f4710090c6f0377d7aa03fc720dcd27d6ecbdc16744e53b2e6ff1edc15a22af5",
+    "references/assets-data.md": "7a68e837031e242c15b71826ec5f105a2e4329853ca9e03a757271b27a892728",
+    "references/build-cmake.md": "502645168955410d92890f6a5cc3050164d79d7e5bd197194e67dd07ffb87b2d",
+    "references/camera-viewport.md": "baceb0c1ec12b0d9c92ad04e7a09b1af544918ec9c96f7fcbf13d3d4e08a70fa",
+    "references/checkpoints-snapshots.md": "7bccc70309403781779e7868df325f8b8c65ee7702974004180e012ec429a198",
+    "references/configure-build-run.md": "f7fe7a0e4cc2c11f36e8855e886c85d189d6691f4dd7653795b879ccb3b136b9",
+    "references/drawing.md": "03b0b7642dfbda3873e793c903175d1ad98b4b9f91cd6e746030e7ab45b3faba",
+    "references/framework-map.md": "d146890045ae6f81588f1bbdbd33df3c14a291708c31ab56b179b62f04c9c332",
+    "references/imgui-ui.md": "665202b2505c344b898dd1115689c4c1e1a0d4ae51d962b0b3fbb30e6505a365",
+    "references/input-events.md": "296feee56a350947639857868a6527a1e67506f59428a3352cbea6a2f6a5adcc",
+    "references/performance.md": "66444947d77e93b20572a9df080356e67e01fd49f38e8a36ab57f7bbc5487934",
+    "references/project-workflow.md": "a465cd5a3e235ee63d8a429a55c15a5fc09871017a482ca2689a95302c93a4c1",
+    "references/scene-lifecycle.md": "ca9cc808bc3041f3554ead53408c7b71bc54572a1fe54fdbdf9960ca418c42d6",
+    "references/simulation-health-diagnostics.md": "5647dfb6a4dd73a95082b11916bec0c98132b71d6f05046b8440376cd73af0ac",
+    "references/temporary-diagnostics.md": "6140c981db69bdd090782ead90ec852ca1222f7a7edd8a49007c5bcd7b12944a",
+    "references/threading.md": "6f1e99e8c91feafb2d8f06cf3f26be646d3b8ce4afece3dc413462e66c845d01",
+    "references/tracing-diagnostics.md": "166ba8ecef0c7ba15656d71f3e01707c15c510b9090ba7384e447b9297c96f53",
+    "references/types.md": "b90e492874d11455d5abb9b152de740a05fc6cd8eda1436b300a36f31907f7e6",
+    "references/visual-qa.md": "18193e0afd6dfed31d624d9c3058cd6765ec995429438ca30d5285327dc6acf3",
+    "scripts/health_session.py": "18c3875ef49f45966887749f983ca4031fb65561e7038d811bc6f23d9bb29ca7"
+  },
+  "pack_name": "bitloop-development",
+  "pack_revision": "2026.10.15.1",
+  "schema_version": 1,
+  "source_revision": "bitloop-agent-pack-v1"
+}

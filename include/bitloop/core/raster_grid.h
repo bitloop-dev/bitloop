@@ -392,8 +392,8 @@ public:
         WorldT _u = bmp_fx / t_bmp_w;
         WorldT _v = bmp_fy / t_bmp_h;
 
-        WorldT scan_left_x  = ax + (dx - ax) * _v;
-        WorldT scan_left_y  = ay + (dy - ay) * _v;
+        WorldT scan_left_x = ax + (dx - ax) * _v;
+        WorldT scan_left_y = ay + (dy - ay) * _v;
         WorldT scan_right_x = bx + (cx - bx) * _v;
         WorldT scan_right_y = by + (cy - by) * _v;
 
@@ -556,6 +556,16 @@ public:
         return false;
     }
 
+    template<typename WorldT = T, typename Callback>
+    void forEachWorldPixel(
+        Callback&& callback,
+        int thread_count = Thread::threadCount()
+    )
+    {
+        int current_row = 0;
+        forEachWorldPixel<WorldT>(current_row, callback, thread_count);
+    }
+
     template<typename WorldT, typename Callback>
     bool forEachWorldTile(
         int tile_w, int tile_h,
@@ -707,6 +717,8 @@ public:
         const WorldT t_bmp_w = static_cast<WorldT>(raster_w);
         const WorldT t_bmp_h = static_cast<WorldT>(raster_h);
 
+        //blPrint() << "ay: " << bl::to_string(ay);
+
         // one persistent task per worker
         std::vector<std::future<void>> futs;
         futs.reserve(thread_count);
@@ -748,7 +760,7 @@ public:
                         for (int bmp_x = x0; bmp_x < x1; ++bmp_x)
                         {
                             const WorldT bmp_fx = static_cast<WorldT>(bmp_x) + WorldT{ 0.5 };
-                            const WorldT u = bmp_fx / t_bmp_w; // TODO: Not efficient for f128 WorldT. Either cache or calculate offset in double precision
+                            const WorldT u = bmp_fx / t_bmp_w; // TODO: Not efficient for fdd WorldT. Either cache or calculate offset in double precision
 
                             const WorldT wx = scan_left_x + (scan_right_x - scan_left_x) * u;
                             const WorldT wy = scan_left_y + (scan_right_y - scan_left_y) * u;
@@ -782,9 +794,12 @@ public:
         }
         return false;
     }
+
+
 };
 
 typedef WorldRasterGridT<f64>  WorldRasterGrid;
-typedef WorldRasterGridT<f128> WorldRasterGrid128;
+typedef WorldRasterGridT<fdd> WorldRasterGrid128;
+typedef WorldRasterGridT<fqd> WorldRasterGrid256;
 
 BL_END_NS;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <bitloop/util/hashable.h>
+
 #include <any>
 #include <concepts>
 #include <cstring>
@@ -12,7 +14,12 @@
 
 template<class U>
 concept HasHashMethod = requires(const U& u) {
-    { u.hash() } -> std::convertible_to<std::size_t>;
+    { u.hash() } -> std::same_as<bl::hash_t>;
+};
+
+template<class U>
+concept HasAnyHashMethod = requires(const U& u) {
+    u.hash();
 };
 
 template<class U>
@@ -31,7 +38,10 @@ class ChangeTracker
 {
     template <typename T>
     struct StateMapPair {
-        using Baseline = std::conditional_t<HasHashMethod<T>, std::size_t, T>;
+        static_assert(!HasAnyHashMethod<T> || HasHashMethod<T>,
+            "ChangeTracker hash() must return bl::hash_t (the stable 64-bit hash type).");
+
+        using Baseline = std::conditional_t<HasHashMethod<T>, bl::hash_t, T>;
         std::unordered_map<T*, Baseline> previous;
         std::unordered_map<T*, unsigned char> current;
     };
@@ -81,7 +91,7 @@ class ChangeTracker
                             continue;
 
                         if constexpr (HasHashMethod<T>) {
-                            const std::size_t h = p->hash();
+                            const bl::hash_t h = p->hash();
                             if (kv.second != h)
                                 kv.second = h;
                         }

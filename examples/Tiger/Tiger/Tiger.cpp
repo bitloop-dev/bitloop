@@ -48,9 +48,8 @@ void Tiger_Scene::sceneStart()
 void Tiger_Scene::sceneMounted(Viewport* ctx)
 {
     // initialize viewport
-    camera.setSurface(ctx);
     camera.setOriginViewportAnchor(Anchor::CENTER);
-    camera.focusWorldRect(-100, -100, 1000, 1000);
+    camera.focusWorldRect(*ctx, -100, -100, 1000, 1000);
 
     navigator.setTarget(camera);
     navigator.setDirectCameraPanning(true);
@@ -59,7 +58,7 @@ void Tiger_Scene::sceneMounted(Viewport* ctx)
 void Tiger_Scene::sceneDestroy()
 {}
 
-void Tiger_Scene::sceneProcess()
+void Tiger_Scene::sceneProcess([[maybe_unused]] double dt)
 {
 }
 
@@ -73,7 +72,7 @@ void Tiger_Scene::viewportProcess(Viewport*, double)
 
 void Tiger_Scene::viewportDraw(Viewport* ctx) const
 {
-    ctx->transform(camera.getTransform());
+    ctx->transform(camera);
     ctx->drawWorldAxis();
 
     ctx->worldCoordinates(transform_coordinates);

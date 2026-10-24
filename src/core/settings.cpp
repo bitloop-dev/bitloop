@@ -72,8 +72,7 @@ void SettingsPanel::init()
 {
     config.updateRecordBitrate();
 
-    SnapshotPresetManager* manager = main_window->getSnapshotPresetManager();
-    SnapshotPresetList& presets = manager->allPresets();
+    SnapshotPresetList& presets = main_window->captureContext().presetManager().allPresets();
     presets.updateSupportedSizes(config.default_ssaa);
 
     CapturePreset* selected_preset = presets.at_safe(selected_capture_preset);
@@ -82,12 +81,11 @@ void SettingsPanel::init()
 
 void SettingsPanel::populateCapturePresetsEditor()
 {
-    bool is_capturing = main_window->getCaptureManager()->isCapturing();
+    bool is_capturing = main_window->captureContext().manager().isCapturing();
     if (is_capturing)
         ImGui::BeginDisabled();
 
-    SnapshotPresetManager* manager = main_window->getSnapshotPresetManager();
-    SnapshotPresetList& presets = manager->allPresets();
+    SnapshotPresetList& presets = main_window->captureContext().presetManager().allPresets();
 
     CapturePreset* selected_preset = presets.at_safe(selected_capture_preset);
 
@@ -355,7 +353,7 @@ void SettingsPanel::populateSettings()
 {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, scale_size(6, 6));
 
-    bool capturing = main_window->getCaptureManager()->isCapturing();
+    bool capturing = main_window->captureContext().manager().isCapturing();
     if (capturing)
         ImGui::BeginDisabled();
 
@@ -397,8 +395,7 @@ void SettingsPanel::populateSettings()
 
     // Capture Presets
     {
-        SnapshotPresetManager* manager = main_window->getSnapshotPresetManager();
-        SnapshotPresetList& presets = manager->allPresets();
+        SnapshotPresetList& presets = main_window->captureContext().presetManager().allPresets();
 
         ImGui::BeginLabelledBox("Capture Presets");
 
@@ -468,31 +465,50 @@ void SettingsPanel::populateSettings()
 
                 ImGui::Spacing();
                 ImGui::Spacing();
-                ImGui::Text("Quality:");
-
-                if (ImGui::SliderInt("##quality", &config.record_quality, 0, 100))
+                if (config.record_format == CaptureFormatVideo::WEBP_VIDEO)
                 {
-                    /// TODO: Apply quality to WebP
+                    ImGui::Text("Compression mode:");
+                    int mode = (int)config.record_webp_mode;
+                    if (ImGui::Combo("##webp_mode", &mode, "Lossless\0Near-lossless\0Lossy\0"))
+                        config.record_webp_mode = (WebPCompressionMode)mode;
+
+                    ImGui::Spacing();
+                    ImGui::Spacing();
+                    if (config.record_webp_mode == WebPCompressionMode::Lossy)
+                    {
+                        ImGui::Text("Image quality:");
+                        ImGui::SliderInt("##quality", &config.record_quality, 0, 100);
+                        ImGui::SetItemTooltip("Higher = better image quality, usually larger files.\nEven 100 is lossy.");
+                    }
+                    else
+                    {
+                        ImGui::Text("Compression effort:");
+                        ImGui::SliderInt("##webp_effort", &config.record_webp_effort, 0, 100);
+                        ImGui::SetItemTooltip("Higher = slower encoding, usually smaller files.\nControls compression effort, not image fidelity.");
+
+                        if (config.record_webp_mode == WebPCompressionMode::NearLossless)
+                        {
+                            ImGui::Spacing();
+                            ImGui::Spacing();
+                            ImGui::Text("Pixel fidelity:");
+                            ImGui::SliderInt("##near_lossless", &config.record_near_lossless, 0, 100);
+                            ImGui::SetItemTooltip("100 = unchanged pixels.\nLower = more pixel changes to reduce file size.\nThis is not a percentage of image quality retained.");
+                        }
+                        else
+                        {
+                            ImGui::TextDisabled("Preserves captured pixels exactly.");
+                        }
+                    }
+                }
+                else
+                {
+                    ImGui::Text("Quality:");
+                    if (ImGui::SliderInt("##quality", &config.record_quality, 0, 100))
+                        config.updateRecordBitrate();
 
                     #if BITLOOP_FFMPEG_ENABLED
-                    config.record_bitrate = (int64_t)(1000000.0 * choose_bitrate_mbps_from_range(config.record_bitrate_mbps_range, config.record_quality));
+                    ImGui::Text("= %.1f Mbps", (double)config.record_bitrate / 1000000.0);
                     #endif
-                }
-
-                #if BITLOOP_FFMPEG_ENABLED
-                ImGui::Text("= %.1f Mbps", (double)config.record_bitrate / 1000000.0);
-                #endif
-
-                ImGui::Spacing();
-                ImGui::Spacing();
-                ImGui::Checkbox("Lossless", &config.record_lossless);
-
-                if (config.record_lossless)
-                {
-                    ImGui::Spacing();
-                    ImGui::Spacing();
-                    ImGui::Text("Lossless quality:");
-                    ImGui::SliderInt("##near_lossless", &config.record_near_lossless, 0, 100);
                 }
 
                 ImGui::Spacing();

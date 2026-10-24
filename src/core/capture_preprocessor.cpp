@@ -14,6 +14,11 @@ BL_BEGIN_NS;
 
 static bool gl_has_current_context()
 {
+    #ifndef __EMSCRIPTEN__
+    if (!glad_glGetString)
+        return false;
+    #endif
+
     const GLubyte* v = glGetString(GL_VERSION);
     return v != nullptr;
 }

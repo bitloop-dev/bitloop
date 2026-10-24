@@ -134,7 +134,7 @@ static bool load_stb_rgba8(const std::string& path, ImageRGBA8& out, std::string
     return true;
 }
 
-bool LoadImageRGBA8(const char* path, ImageRGBA8& out, int svgTargetW, int svgTargetH, std::string* err)
+bool loadImageRGBA8(const char* path, ImageRGBA8& out, int svgTargetW, int svgTargetH, std::string* err)
 {
     out = {};
 
@@ -194,7 +194,7 @@ GLuint loadGLTextureRGBA8(
     std::string* err)
 {
     ImageRGBA8 img;
-    if (!LoadImageRGBA8(path, img, svgTargetW, svgTargetH, err))
+    if (!loadImageRGBA8(path, img, svgTargetW, svgTargetH, err))
         return 0;
 
     if (outW) *outW = img.w;

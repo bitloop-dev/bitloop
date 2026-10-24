@@ -11,16 +11,15 @@
       "name": "brotli-tool",
       "host": true
     },
+    "fltx",
     "catch2",
     "freetype",
     "sdl3",
     "glad",
-    "gcem",
     "concurrentqueue",
     "tsl-ordered-map",
     "nanovg",
     "nanosvg",
-
     "libwebp",
     "nlohmann-json",
     "brotli",
@@ -28,7 +27,12 @@
     "implot",
     {
       "name": "imgui",
-      "features": [ "docking-experimental", "freetype", "sdl3-binding", "opengl3-binding" ]
+      "features": [
+        "docking-experimental",
+        "freetype",
+        "sdl3-binding",
+        "opengl3-binding"
+      ]
     },
     {
       "name": "ffmpeg",

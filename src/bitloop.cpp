@@ -63,6 +63,8 @@
 #include <memory>
 
 #include <bitloop/core/project.h>
+#include <bitloop/util/debug_timer.h>
+#include <bitloop/platform/sdl_event.h>
 
 #ifdef __EMSCRIPTEN__
 #define SDL_MAIN_HANDLED
@@ -82,6 +84,9 @@
 /// Project files
 #include <bitloop/core/project_worker.h>
 #include <bitloop/core/main_window.h>
+#ifdef BITLOOP_DEV_MODE
+    #include <bitloop/core/headless_runner.h>
+#endif
 
 using namespace bl;
 
@@ -104,7 +109,6 @@ void gui_loop()
         platform()->upscaleMouseEventToOffscreen(es);
         #endif
 
-        // this gets called more when active
         main_window()->threadQueue().pump();
 
         ImGui_ImplSDL3_ProcessEvent(&es);
@@ -129,13 +133,13 @@ void gui_loop()
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
             case SDL_EVENT_MOUSE_BUTTON_UP:
             case SDL_EVENT_MOUSE_MOTION:
-                project_worker()->queueEvent(es);
+                project_worker()->queueEvent(copySDLEvent(es));
                 break;
 
             case SDL_EVENT_MOUSE_WHEEL:
                 // Project ignores scroll events when mouse is over ImGui
                 if (main_window()->viewportHovered())
-                    project_worker()->queueEvent(es);
+                    project_worker()->queueEvent(copySDLEvent(es));
                 break;
 
             case SDL_EVENT_KEY_DOWN:
@@ -143,7 +147,7 @@ void gui_loop()
             case SDL_EVENT_TEXT_INPUT:
                 // Project ignores key events when ImGui input active
                 if (!imguiWantsKeyboard) 
-                    project_worker()->queueEvent(es);
+                    project_worker()->queueEvent(copySDLEvent(es));
                 break;
             
             case SDL_EVENT_DROP_FILE: {
@@ -151,11 +155,11 @@ void gui_loop()
                 blPrint() << path; // valid
 
                 // okay?
-                project_worker()->queueEvent(es);
+                project_worker()->queueEvent(copySDLEvent(es));
             } break;
 
             default:
-                project_worker()->queueEvent(es);
+                project_worker()->queueEvent(copySDLEvent(es));
                 break;
         }
     }
@@ -167,12 +171,11 @@ void gui_loop()
 
     ImGui_ImplSDL3_NewFrame();
 
-    ImGui::GetIO().DisplaySize = (ImVec2)platform()->fboSize();
+    ImGui::GetIO().DisplaySize = ImVec2((float)platform()->fboSize().x, (float)platform()->fboSize().y);
     ImGui::GetIO().DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
 
     platform()->imguiFixOffscreenMousePosition();
 
-    /// this gets called most while idling
     main_window()->threadQueue().pump();
 
     ImGui::NewFrame();
@@ -232,8 +235,16 @@ void clipboard_paste_callback(std::string&& paste_data, void* callback_data)
 }
 #endif
 
-int bitloop_main(int, char* [])
+int bitloop_main(int argc, char* argv[])
 {
+#ifdef BITLOOP_DEV_MODE
+    if (isHeadlessCommand(argc, argv))
+        return runHeadlessFromCommandLine(argc, argv);
+#else
+    (void)argc;
+    (void)argv;
+#endif
+
     // ======== SDL Window setup ========
     {
         SDL_Init(SDL_INIT_VIDEO);
@@ -317,8 +328,9 @@ int bitloop_main(int, char* [])
 
     {
         auto _platform_manager = std::make_unique<PlatformManager>(window);
-        auto _main_window      = std::make_unique<MainWindow>(shared_sync);
-        auto _project_worker   = std::make_unique<ProjectWorker>(shared_sync, _main_window->getCaptureManager());
+        auto _capture_context  = std::make_unique<CaptureContext>();
+        auto _main_window      = std::make_unique<MainWindow>(shared_sync, *_capture_context);
+        auto _project_worker   = std::make_unique<ProjectWorker>(shared_sync, *_capture_context);
 
         // ======== ImGui setup ========
         {

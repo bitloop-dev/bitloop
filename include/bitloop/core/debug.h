@@ -32,7 +32,9 @@
   #define NOMINMAX
   #endif
   #include <windows.h>
+  #ifdef _MSC_VER
   #include <stacktrace>
+  #endif
 #elif defined(__EMSCRIPTEN__)
   #include <emscripten/emscripten.h>
 #endif
@@ -208,7 +210,7 @@ public:
     void flush() {
         if (!len) return;
 
-        buf[len-1] = '\0';
+        buf[len] = '\0';
 
         #ifdef WIN32
         OutputDebugStringA(buf);

@@ -36,7 +36,7 @@ void ProjectWorker::_destroyActiveProject()
     {
         current_project->_projectDestroy();
 
-        // force any UI / deferred destructions to happen on the main GUI thread *before* deleting the project/scenes
+        // Finish project UI cleanup and remaining deferred deletions before deleting the project.
         // current_project->ui==nullptr after this
         main_window()->threadQueue().invokeBlocking([&]()
         {
@@ -44,7 +44,6 @@ void ProjectWorker::_destroyActiveProject()
             main_window()->threadQueue().drain();
         });
 
-        // destroys layout, which destroys viewports, which calls sceneDestroy on unmount
         delete current_project;
         current_project = nullptr;
     }
@@ -65,7 +64,11 @@ void ProjectWorker::handleProjectCommands(ProjectCommandEvent& e)
         _destroyActiveProject();
 
         current_project = ProjectBase::findProjectInfo(e.project_uid)->creator();
-        current_project->configure(e.project_uid, main_window()->getCanvas(), &project_log);
+        current_project->configure(
+            e.project_uid,
+            main_window()->getCanvas(),
+            &project_log,
+            capture_context);
 
         main_window()->queueMainWindowCommand({ MainWindowCommandType::ON_SELECT_PROJECT });
     }
@@ -174,7 +177,7 @@ void ProjectWorker::worker_loop()
 
                 // Capture by default unless sim overrides flag (only has an affect when recording)
                 if (!current_project->paused)
-                    main_window()->captureFrame(true);
+                    capture_context->captureFrame(true);
 
                 current_project->invokeScheduledCalls();
 
@@ -205,17 +208,18 @@ void ProjectWorker::worker_loop()
         // If recording, don't wake GUI until capture_manager is ready to encode a new frame,
         // otherwise the main GUI thread would need to block while it waits for the last frame to encode.
         // We intentionally avoid a frame queue so video encoding stays in sync with simulation.
-        if (main_window()->capturingNextFrame())
+        if (capture_context->capturingNextFrame())
         {
-            if ((capture_manager->isRecording() || capture_manager->isSnapshotting()))
-                capture_manager->waitUntilReadyForNewFrame();
+            CaptureManager& capture_manager = capture_context->manager();
+            if ((capture_manager.isRecording() || capture_manager.isSnapshotting()))
+                capture_manager.waitUntilReadyForNewFrame();
         }
 
         // delay to achieve target fps (minus time taken to draw the frame)
         if (!immediate_update_requested)
         {
             auto dt = std::chrono::steady_clock::now() - last_frame_time;
-            uint64_t target_ns = 1000000000 / main_window()->getFPS();
+            uint64_t target_ns = 1000000000 / capture_context->fps();
             uint64_t frame_ns = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(dt).count());
             uint64_t delay_ns = std::max((uint64_t)0, target_ns - frame_ns);
             if (delay_ns > 0) SDL_DelayPrecise(delay_ns);
@@ -273,12 +277,12 @@ void ProjectWorker::pullDataFromShadow()
     }
 }
 
-void ProjectWorker::queueEvent(const SDL_Event& event)
+void ProjectWorker::queueEvent(EventData event)
 {
     // Queue events which should only be processed once the current worker frame completes
     {
         std::lock_guard<std::mutex> lock(event_queue_mutex);
-        input_event_queue.push_back(event);
+        input_event_queue.push_back(std::move(event));
     }
 
     // Immediately process events for the overlay
@@ -287,13 +291,13 @@ void ProjectWorker::queueEvent(const SDL_Event& event)
 void ProjectWorker::pollEvents()
 {
     // Grab event queue data (and clear via swap with empty queue)
-    std::vector<SDL_Event> local;
+    std::vector<EventData> local;
     {
         std::lock_guard<std::mutex> lock(event_queue_mutex);
         local.swap(input_event_queue);
     }
 
-    for (SDL_Event& e : local)
+    for (const EventData& e : local)
         _onEvent(e);
 }
 
@@ -325,7 +329,7 @@ void ProjectWorker::onEncodeFrame(EncodeFrame& data, int request_id, const Captu
         current_project->_onEncodeFrame(data, request_id, preset);
 }
 
-void ProjectWorker::_onEvent(SDL_Event& e)
+void ProjectWorker::_onEvent(const EventData& e)
 {
     BL_TAKE_OWNERSHIP("live");
 

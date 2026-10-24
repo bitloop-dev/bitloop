@@ -73,30 +73,30 @@
       }
     },
     {
-      "name": "vs2022",
+      "name": "vs2026",
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
         "rhs": "Windows"
       },
-      "generator": "Visual Studio 17 2022",
-      "binaryDir": "${sourceDir}/build/vs2022",
+      "generator": "Visual Studio 18 2026",
+      "binaryDir": "${sourceDir}/build/vs2026",
       "toolchainFile": "${sourceDir}/cmake/toolchain/vcpkg_autodetect.cmake",
       "cacheVariables": {
-        "BUILD_FLAVOR": "vs2022",
+        "BUILD_FLAVOR": "vs2026",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/install",
         "CMAKE_CONFIGURATION_TYPES": "Debug;Release",
         "VCPKG_INSTALL_OPTIONS": "--x-abi-tools-use-exact-versions"
       }
     },
     {
-      "name": "vs2022-static",
+      "name": "vs2026-static",
       "hidden": true,
-      "generator": "Visual Studio 17 2022",
-      "binaryDir": "${sourceDir}/build/vs2022-static",
+      "generator": "Visual Studio 17 2026",
+      "binaryDir": "${sourceDir}/build/vs2026-static",
       "toolchainFile": "${sourceDir}/cmake/toolchain/vcpkg_autodetect.cmake",
       "cacheVariables": {
-        "BUILD_FLAVOR": "vs2022-static",
+        "BUILD_FLAVOR": "vs2026-static",
         "VCPKG_TARGET_TRIPLET": "x64-windows-static",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/install",
         "CMAKE_CONFIGURATION_TYPES": "Debug;Release",

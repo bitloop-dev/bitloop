@@ -49,6 +49,7 @@
 
 #include "imgui.h"
 #include "imgui_internal.h"
+#include <bitloop/util/hashable.h>
 //#include "types.h"
 
 #include <math.h>
@@ -69,12 +70,6 @@ struct ImGradientMark
 };
 
 namespace detail {
-    inline void hash_combine(std::size_t& seed, std::size_t value) noexcept {
-        seed ^= value + 0x9e3779b97f4a7c15ull + (seed << 6) + (seed >> 2);
-    }
-    inline std::size_t hash_int64(std::int64_t v) noexcept {
-        return std::hash<std::int64_t>{}(v);
-    }
     inline std::int64_t quantize(float x, float eps) noexcept {
         return static_cast<std::int64_t>(llround(static_cast<double>(x) / static_cast<double>(eps)));
     }
@@ -191,7 +186,7 @@ public:
         c = m_cachedColors[(int)(position * CACHE_SIZE_M1)];
     }
 
-    size_t hash() const
+    bl::hash_t hash() const
     {
         return _hash;
     }
@@ -220,18 +215,18 @@ private:
     float m_cachedValues[CACHE_SIZE * 3]{};
     uint32_t m_cachedColors[CACHE_SIZE]{};
 
-    mutable size_t _hash = 0;
+    mutable bl::hash_t _hash = 0;
 
     void updateHash() const noexcept
     {
-        _hash = 0;
+        bl::StableHasher hasher;
 
         // Match == : size, dragging_uid, selected_uid
-        detail::hash_combine(_hash, std::hash<std::size_t>{}(m_marks.size()));
+        hasher.add(m_marks.size());
 
         // skip hashing dragging/selected marks. hash only changes if gradient itself changes
-        detail::hash_combine(_hash, std::hash<int>{}(dragging_uid));
-        detail::hash_combine(_hash, std::hash<int>{}(selected_uid));
+        hasher.add(dragging_uid);
+        hasher.add(selected_uid);
 
         // Match == : order matters; compare position (with eps) and color[0..2] (with eps)
         for (const ImGradientMark& m : m_marks) {
@@ -241,13 +236,13 @@ private:
             const std::int64_t qc1 = detail::quantize(m.color[1], kEps);
             const std::int64_t qc2 = detail::quantize(m.color[2], kEps);
 
-            std::size_t h = detail::hash_int64(qp);
-            detail::hash_combine(h, detail::hash_int64(qc0));
-            detail::hash_combine(h, detail::hash_int64(qc1));
-            detail::hash_combine(h, detail::hash_int64(qc2));
-
-            detail::hash_combine(_hash, h);
+            hasher.add(qp);
+            hasher.add(qc0);
+            hasher.add(qc1);
+            hasher.add(qc2);
         }
+
+        _hash = hasher.finish();
     }
 };
 

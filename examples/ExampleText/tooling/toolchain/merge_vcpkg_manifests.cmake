@@ -5,6 +5,7 @@
 #   bl_merge_vcpkg_manifests(
 #     ROOT_MANIFEST      "${_root_dir}/vcpkg.json"
 #     CHILD_MANIFESTS    "${BL_CHILD_MANIFESTS}"   # list of .../vcpkg.json files
+#     PROVIDED_PORTS     bitloop                    # supplied by the source tree
 #     OUT_DIR            "${BL_MERGED_MANIFEST_DIR}"
 #     [VERBOSE]
 #   )
@@ -475,7 +476,7 @@ function(_bl_dep_put names_var frags_var kinds_var name frag kind)
   set(${kinds_var} "${_kinds}" PARENT_SCOPE)
 endfunction()
 
-function(_bl_collect_deps manifest_path manifest_json names_var frags_var kinds_var)
+function(_bl_collect_deps manifest_path manifest_json provided_ports names_var frags_var kinds_var)
   # Pull current lists from caller
   set(_names "${${names_var}}")
   set(_frags "${${frags_var}}")
@@ -545,6 +546,13 @@ function(_bl_collect_deps manifest_path manifest_json names_var frags_var kinds_
 
     else()
       message(FATAL_ERROR "Unsupported dependency entry type '${_type}' in ${manifest_path}")
+    endif()
+
+    # A source provider supplies these ports directly. Skip them before
+    # duplicate/object conflict handling so their manifest spelling is irrelevant.
+    list(FIND provided_ports "${_dep_name}" _provided_index)
+    if(NOT _provided_index EQUAL -1)
+      continue()
     endif()
 
     # Insert / merge policy
@@ -626,7 +634,7 @@ function(bl_merge_vcpkg_manifests)
   cmake_parse_arguments(BL
     "ALLOW_CHILD_OVERRIDES;VERBOSE"
     "ROOT_MANIFEST;OUT_DIR;MODE"
-    "CHILD_MANIFESTS"
+    "CHILD_MANIFESTS;PROVIDED_PORTS"
     ${ARGV}
   )
 
@@ -674,7 +682,10 @@ function(bl_merge_vcpkg_manifests)
   set(_names "")
   set(_frags "")
   set(_kinds "")
-  _bl_collect_deps("${BL_ROOT_MANIFEST}" "${_root_json}" _names _frags _kinds)
+  _bl_collect_deps(
+    "${BL_ROOT_MANIFEST}" "${_root_json}" "${BL_PROVIDED_PORTS}"
+    _names _frags _kinds
+  )
 
   foreach(m IN LISTS _children)
     file(READ "${m}" _child_json)
@@ -699,7 +710,10 @@ function(bl_merge_vcpkg_manifests)
       )
     endif()
 
-    _bl_collect_deps("${m}" "${_child_json}" _names _frags _kinds)
+    _bl_collect_deps(
+      "${m}" "${_child_json}" "${BL_PROVIDED_PORTS}"
+      _names _frags _kinds
+    )
   endforeach()
 
   _bl_build_deps_array_json("${_names}" "${_frags}" _deps_union_json)

@@ -151,6 +151,15 @@ protected:
         else
         {
             nvgUpdateImage(vg, nano_img, pixels.data());
+            if (nano_img)
+            {
+                // NanoVG updates level zero only; minification must sample the latest pixels too.
+                GLint previousTexture = 0;
+                glGetIntegerv(GL_TEXTURE_BINDING_2D, &previousTexture);
+                glBindTexture(GL_TEXTURE_2D, nvglImageHandle(vg, nano_img));
+                glGenerateMipmap(GL_TEXTURE_2D);
+                glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(previousTexture));
+            }
         }
     }
 
@@ -262,6 +271,7 @@ public:
 };
 
 typedef WorldImageT<f64> WorldImage;
-typedef WorldImageT<f128> WorldImage128;
+typedef WorldImageT<fdd> WorldImage128;
+typedef WorldImageT<fqd> WorldImage256;
 
 BL_END_NS

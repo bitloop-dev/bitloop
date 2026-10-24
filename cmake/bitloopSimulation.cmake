@@ -20,6 +20,14 @@ function(_apply_common_settings _TARGET)
 	  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 	)
 
+	# Automatically apply bitloop.h as a precompiled header for all child targets except bitloop itself
+    #if(NOT "${_TARGET}" STREQUAL "bitloop")
+    #    if(TARGET bitloop::bitloop)
+	#		message(STATUS "Applying precompiled header <bitloop.h> for ${_TARGET}")
+    #        target_precompile_headers(${_TARGET} PRIVATE <bitloop.h>)
+    #    endif()
+    #endif()
+
 	if (MSVC)
 		target_compile_options(${_TARGET} PRIVATE /MP) # Multi-threaded compilation
 		target_compile_options(${_TARGET} PRIVATE /permissive- /W3 /WX /utf-8 /D_CRT_SECURE_NO_WARNINGS)
@@ -229,11 +237,6 @@ function(_init_root_dev_mode)
 
   if (CMAKE_CURRENT_SOURCE_DIR STREQUAL _root)
 
-    # Remove any stale cached value so dev-mode is NOT "sticky".
-    if (DEFINED CACHE{BITLOOP_DEV_MODE})
-      unset(BITLOOP_DEV_MODE CACHE)
-    endif()
-
     # TRUE only if the root explicitly set a normal variable to TRUE.
     if (DEFINED BITLOOP_DEV_MODE AND BITLOOP_DEV_MODE)
       set_property(GLOBAL PROPERTY BL_DEV_MODE_EFFECTIVE 1)
@@ -346,6 +349,9 @@ function(bitloop_new_project sim_name)
 		_get_dev_mode(_dev)
 
 		if (_dev)
+			if (TARGET bitloop)
+				target_compile_definitions(bitloop PUBLIC BITLOOP_DEV_MODE=1)
+			endif()
 			target_compile_definitions(${_TARGET} PRIVATE BITLOOP_DEV_MODE=1)
 		endif()
 
@@ -408,7 +414,7 @@ function(bitloop_new_project sim_name)
 			file(APPEND ${INCLUDE_HEADER_PATH} "#pragma push_macro(\"SIM_NAME\")\n")
 			file(APPEND ${INCLUDE_HEADER_PATH} "#undef SIM_NAME\n")
 			file(APPEND ${INCLUDE_HEADER_PATH} "#define SIM_NAME ${sim_name}\n")
-			file(APPEND ${INCLUDE_HEADER_PATH} "#include <bitloop/core/project.h>\n")
+			file(APPEND ${INCLUDE_HEADER_PATH} "#include <bitloop.h>\n")
 			file(APPEND ${INCLUDE_HEADER_PATH} "#line 1 \"${_hdr_abs}\"\n")
 			file(APPEND ${INCLUDE_HEADER_PATH} "#include \"${_hdr_abs}\"\n")
 			file(APPEND ${INCLUDE_HEADER_PATH} "#pragma pop_macro(\"SIM_NAME\")\n")
@@ -446,6 +452,17 @@ function(bitloop_add_dependency _TARGET _SIM_DIR)
 	get_filename_component(_sim_abs "${_SIM_DIR}" REALPATH BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 	set(_child_manifest "${_sim_abs}/vcpkg.json")
 	set(_child_config   "${_sim_abs}/vcpkg-configuration.json")
+	set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_sim_abs}/CMakeLists.txt")
+	file(GLOB _child_cmake CONFIGURE_DEPENDS "${_sim_abs}/CMakeLists.txt")
+
+	if(NOT EXISTS "${_sim_abs}/CMakeLists.txt")
+		if (NOT BITLOOP_DISCOVERY)
+			msg_indent_push()
+			msg(STATUS "[${sim_name}] -- not found")
+			msg_indent_pop()
+		endif()
+		return()
+	endif()
 	
 	if(NOT TARGET ${sim_name}::${sim_name})
 		# Register configure dependencies so edits to child manifests/config trigger reconfigure
@@ -495,7 +512,7 @@ macro(bitloop_finalize)
 
 
 		file(WRITE "${BL_AUTOGEN_INCLUDES}" "// Auto‑generated simulation includes\n")
-		file(APPEND "${BL_AUTOGEN_INCLUDES}" "#include <bitloop/core/project.h>\n\n")
+		file(APPEND "${BL_AUTOGEN_INCLUDES}" "#include <bitloop.h>\n\n")
 
 		get_property(_project_names GLOBAL PROPERTY BL_PROJECTS)
 
@@ -634,4 +651,3 @@ function(msg)
   endif()
   message(${_status} "${_indent}${_text}")
 endfunction()
-

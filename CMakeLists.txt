@@ -7,7 +7,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
 # ────────── Default Options ──────────
 option(BITLOOP_WITH_FFMPEG      "Build with FFmpeg"             OFF)
 option(BITLOOP_WITH_FFMPEG_X265 "FFmpeg built with x265 (GPL)"  OFF)
-option(BITLOOP_BUILD_TESTS      "Build tests"                   OFF) # keep off for releases
+option(BITLOOP_BUILD_TESTS      "Build tests"                   ${PROJECT_IS_TOP_LEVEL})
 
 # ────────── Bootstrap package helpers for both in‑tree & installed modes ──────────
 set(BL_SIM_CMAKE "${CMAKE_CURRENT_LIST_DIR}/cmake/bitloopSimulation.cmake")
@@ -47,7 +47,7 @@ endif()
 set(BL_INC      "${CMAKE_CURRENT_SOURCE_DIR}/include/bitloop")
 set(BL_SRC      "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(HINT_FILE   "${BL_INC}/cpp.hint")
-set(NATVIS_FILE "${BL_INC}/bl.natvis")
+#set(NATVIS_FILE "${BL_INC}/bl.natvis")
 
 file(GLOB CORE_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/include/bitloop.h"
@@ -94,7 +94,7 @@ endforeach()
 
 set(ALL_SRC_FILES
     ${HINT_FILE}
-    ${NATVIS_FILE}
+    #${NATVIS_FILE}
 
     ${CORE_SOURCES}
     ${PLATFORM_SOURCES}
@@ -106,6 +106,12 @@ set(ALL_SRC_FILES
 add_library(bitloop STATIC ${ALL_SRC_FILES})
 _apply_common_settings(bitloop)
 
+if (MSVC)
+    target_compile_options(bitloop PRIVATE /Bt+)
+    target_link_options(bitloop PRIVATE /TIME)
+endif()
+
+
 # todo: To embed icon, you will need to place icon/rc in "static" dir and add a step to copy
 #       somewhere into the build folder, then call in _apply_main_settings so all child sims
 #       get the same icon.
@@ -114,6 +120,11 @@ _apply_common_settings(bitloop)
 #	message(STATUS "${CMAKE_CURRENT_BINARY_DIR}/../app/data/icon/appicon.rc")
 #	target_sources(bitloop PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/../app/data/icon/appicon.rc")
 #endif()
+
+
+# Precompiled headers (build performance)
+# Limit PCH to stable standard headers to maximize reuse and minimize invalidation.
+#target_precompile_headers(bitloop PRIVATE "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/bitloop/pch.h>")
 
 if (EMSCRIPTEN)
     # Fix missing __EMSCRIPTEN__ define (possibly due to custom toolchain loader)
@@ -145,6 +156,7 @@ find_package(imgui CONFIG REQUIRED)
 find_package(implot CONFIG REQUIRED)
 find_package(SDL3 CONFIG REQUIRED)
 find_package(glad CONFIG REQUIRED)
+find_package(fltx CONFIG REQUIRED)
 find_package(concurrentqueue CONFIG REQUIRED)
 find_package(nanovg CONFIG REQUIRED)
 find_package(NanoSVG CONFIG REQUIRED)
@@ -154,7 +166,7 @@ find_package(unofficial-brotli CONFIG REQUIRED)
 
 find_path(TSL_ORDERED_MAP_INCLUDE_DIRS NAMES "tsl/ordered_hash.h" REQUIRED)
 find_path(BSHOSHANY_THREAD_POOL_INCLUDE_DIRS "BS_thread_pool.hpp")
-find_path(GCEM_INCLUDE_DIRS "gcem.hpp")
+#find_path(GCEM_INCLUDE_DIRS "gcem.hpp")
 
 
 target_link_libraries(bitloop
@@ -164,6 +176,7 @@ target_link_libraries(bitloop
     implot::implot
     SDL3::SDL3
     glad::glad
+    fltx::fltx
     concurrentqueue::concurrentqueue
     nanovg::nanovg
     NanoSVG::nanosvg
@@ -174,8 +187,8 @@ target_link_libraries(bitloop
     unofficial::brotli::brotlienc
 )
 target_include_directories(bitloop PRIVATE ${BSHOSHANY_THREAD_POOL_INCLUDE_DIRS})
-target_include_directories(bitloop PRIVATE ${GCEM_INCLUDE_DIRS})
 target_include_directories(bitloop PRIVATE ${TSL_ORDERED_MAP_INCLUDE_DIRS})
+#target_include_directories(bitloop PRIVATE ${GCEM_INCLUDE_DIRS})
 
 if (NOT EMSCRIPTEN)
     #message(STATUS "Non-web build - permitting FFmpeg")
@@ -217,6 +230,85 @@ target_compile_definitions(bitloop PUBLIC
 )
 
 add_library(bitloop::bitloop ALIAS bitloop)
+
+# Experimental source-build target. Keep this list explicit while separating
+# backend calls from simulation code; an archive build does not prove isolation.
+set(ALL_CORE_SRC_FILES
+    "${BL_SRC}/core/camera.cpp"
+    "${BL_SRC}/core/event.cpp"
+    "${BL_SRC}/core/layout.cpp"
+    "${BL_SRC}/core/layout_solver.cpp"
+    "${BL_SRC}/core/project.cpp"
+    "${BL_SRC}/core/project_worker.cpp"
+    "${BL_SRC}/core/scene.cpp"
+    "${BL_SRC}/core/snapshot_presets.cpp"
+    "${BL_SRC}/core/viewport.cpp"
+    "${BL_SRC}/core/sim_checkpoint.cpp"
+    "${BL_SRC}/core/sim_snapshot.cpp"
+    "${BL_SRC}/core/sim_trace.cpp"
+    "${BL_SRC}/util/json.cpp"
+    "${BL_SRC}/util/text_util.cpp"
+    "${BL_SRC}/imguix/imguix.cpp"
+    "${BL_SRC}/imguix/imgui_gradient_edit.cpp"
+)
+
+add_library(bitloop-core STATIC EXCLUDE_FROM_ALL ${ALL_CORE_SRC_FILES})
+add_library(bitloop::core ALIAS bitloop-core)
+
+target_compile_features(bitloop-core PUBLIC cxx_std_23)
+set_target_properties(bitloop-core PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    FOLDER "Bitloop/Experimental"
+)
+
+target_include_directories(bitloop-core
+    PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+        ${BSHOSHANY_THREAD_POOL_INCLUDE_DIRS}
+        ${TSL_ORDERED_MAP_INCLUDE_DIRS}
+)
+
+# Mirror shared-type configuration, including dev-mode definitions added by the
+# consuming project later. This does not link the full library into core.
+target_compile_definitions(bitloop-core
+    PRIVATE CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    PUBLIC "$<TARGET_PROPERTY:bitloop,INTERFACE_COMPILE_DEFINITIONS>"
+)
+
+target_link_libraries(bitloop-core
+    PUBLIC
+        imgui::imgui
+        implot::implot
+        fltx::fltx
+        concurrentqueue::concurrentqueue
+        nlohmann_json::nlohmann_json
+)
+
+# _apply_common_settings also sets up the graphical Web application.
+if(MSVC)
+    target_compile_options(bitloop-core PRIVATE
+        /MP /permissive- /W3 /WX /utf-8 /D_CRT_SECURE_NO_WARNINGS /Bt+
+    )
+elseif(EMSCRIPTEN)
+    target_compile_options(bitloop-core PUBLIC -pthread -msimd128)
+    target_link_options(bitloop-core INTERFACE -pthread)
+endif()
+
+if (NOT EMSCRIPTEN)
+    add_executable(reconstruct_full_frame EXCLUDE_FROM_ALL
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/trace/reconstruct_full_frame.cpp"
+    )
+    target_link_libraries(reconstruct_full_frame PRIVATE nlohmann_json::nlohmann_json)
+    target_compile_features(reconstruct_full_frame PRIVATE cxx_std_20)
+    set_target_properties(reconstruct_full_frame PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/_bitloop/tools"
+        FOLDER "Bitloop/Tools"
+    )
+
+    install(TARGETS reconstruct_full_frame
+        RUNTIME DESTINATION bin
+    )
+endif()
 
 
 # ──────── Install static libs ────────
@@ -300,6 +392,7 @@ endif()
 
 
 if (BITLOOP_BUILD_TESTS)
+
   enable_testing()
   add_subdirectory(tests)
 endif()

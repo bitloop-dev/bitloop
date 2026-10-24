@@ -1,11 +1,21 @@
 #pragma once
 
+#include <algorithm>
+#include <cstring>
+#include <format>
+#include <functional>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <vector>
+
 #include <bitloop/core/types.h>
-#include <bitloop/platform/platform.h>
-#include <bitloop/core/capture_manager.h>
 #include <bitloop/util/hashable.h>
 
 BL_BEGIN_NS;
+
+struct GLCaps;
+struct EncodeFrame;
 
 template <std::size_t N>
 inline void assign_fixed_string(char(&dest)[N], std::string_view src)
@@ -143,13 +153,7 @@ public:
         }
     }
 
-    bool updateSupportedSize(const GLCaps& caps, int default_ssaa) const
-    {
-        int full_w = width() * (ssaa > 0 ? ssaa : default_ssaa);
-        int full_h = height() * (ssaa > 0 ? ssaa : default_ssaa);
-        is_supported_size = (full_w <= caps.max_viewport_w) && (full_h <= caps.max_viewport_h);
-        return is_supported_size;
-    }
+    bool updateSupportedSize(const GLCaps& caps, int default_ssaa) const;
 };
 
 typedef std::unordered_map<bl::hash_t, bool> SnapshotPresetHashMap;
@@ -276,12 +280,7 @@ public:
         return filtered_presets;
     }
 
-    void updateSupportedSizes(int default_ssaa) const
-    {
-        GLCaps caps = platform()->glCaps();
-        for (auto& item : items)
-            item.updateSupportedSize(caps, default_ssaa);
-    }
+    void updateSupportedSizes(int default_ssaa) const;
 };
 
 class SettingsPanel;
@@ -361,6 +360,12 @@ public:
         // ------------------------------
         capture_presets.add(CapturePreset("Valve Steam Deck OLED", "steamdeckoled", { 1280,  800 }));
         capture_presets.add(CapturePreset("Nintendo Switch OLED", "switcholed", { 1280,  720 }));
+
+        // ------------------------------
+        // Web
+        // ------------------------------
+        capture_presets.add(CapturePreset("Wide med", "weblarge", { 800,  600 }));
+        capture_presets.add(CapturePreset("Wide med", "websmall", { 600,  480 }));
 
         // ------------------------------
         // Thumbnails / Icons

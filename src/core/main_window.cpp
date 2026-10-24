@@ -717,23 +717,22 @@ std::string MainWindow::prepareFullCapturePath(
 
 void MainWindow::queueBeginSnapshot(const SnapshotPresetList& presets, std::string_view rel_path_fmt, int request_id)
 {
-    SnapshotPresetsArgs payload;
-    payload.rel_path_fmt = rel_path_fmt;
-    payload.presets = presets;
-    payload.request_id = request_id;
-    queueMainWindowCommand({ MainWindowCommandType::BEGIN_SNAPSHOT_PRESET_LIST, payload });
+    capture_context.queueBeginSnapshot(presets, rel_path_fmt, request_id);
 }
 void MainWindow::queueBeginRecording()
 {
-    queueMainWindowCommand({ MainWindowCommandType::BEGIN_RECORDING });
+    capture_context.queueBeginRecording();
 }
 void MainWindow::queueEndRecording()
 {
-    queueMainWindowCommand({ MainWindowCommandType::END_RECORDING });
+    capture_context.queueEndRecording();
 }
 void MainWindow::beginRecording(const CapturePreset& preset, const char* rel_path_fmt)
 {
     namespace fs = std::filesystem;
+
+    CaptureManager& capture_manager = capture_context.manager();
+    SettingsConfig& settings = capture_context.settings();
 
     assert(!capture_manager.isRecording());
     assert(!capture_manager.isSnapshotting());
@@ -743,17 +742,17 @@ void MainWindow::beginRecording(const CapturePreset& preset, const char* rel_pat
     //record.enabled = true; // keep record button enabled. Clicking again ends recording
 
     // Mainly used for snapshot lists, but set anyway for consistency
-    active_capture_rel_path_fmt = rel_path_fmt;
+    capture_context.active_capture_rel_path_fmt = rel_path_fmt;
 
     // don't capture until simulation is ready to draw at the new resolution
-    new_frame_prepared = false;
+    capture_context.new_frame_prepared = false;
 
     // If not web, decide on save path
     #ifndef BL_WEB_BUILD
     fs::path capture_dir;
     fs::path filename;
 
-    switch ((CaptureFormat)getSettingsConfig()->getRecordFormat())
+    switch ((CaptureFormat)settings.getRecordFormat())
     {
         #if BITLOOP_FFMPEG_ENABLED
         #if BITLOOP_FFMPEG_X265_ENABLED
@@ -780,24 +779,31 @@ void MainWindow::beginRecording(const CapturePreset& preset, const char* rel_pat
     #endif
 
     CaptureConfig config;
-    config.format             =       getSettingsConfig()->getRecordFormat();
+    config.format             =       settings.getRecordFormat();
     config.resolution         =       preset.getResolution();
-    config.fps                =       getSettingsConfig()->record_fps;
-    config.record_frame_count =       getSettingsConfig()->record_frame_count;
-    config.quality            = (f32) getSettingsConfig()->record_quality;
-    config.near_lossless      =       getSettingsConfig()->record_near_lossless;
+    config.fps                =       settings.record_fps;
+    config.record_frame_count =       settings.record_frame_count;
+    config.quality            = (f32) settings.record_quality;
+
+    if (config.format == CaptureFormat::WEBP_VIDEO)
+    {
+        config.lossless = settings.record_webp_mode != WebPCompressionMode::Lossy;
+        config.near_lossless = settings.record_webp_mode == WebPCompressionMode::NearLossless ? settings.record_near_lossless : 100;
+        if (config.lossless)
+            config.quality = (f32)settings.record_webp_effort;
+    }
 
     #if BITLOOP_FFMPEG_ENABLED
-    config.bitrate = getSettingsConfig()->record_bitrate;
+    config.bitrate = settings.record_bitrate;
     #endif
 
     #ifndef BL_WEB_BUILD
     config.filename = filename.string();
     #endif
 
-    enabled_capture_presets = SnapshotPresetList(preset);
-    enabled_capture_presets_current_idx = 0;
-    active_snapshot_preset_request_id = 0; // no assigned callback for recording
+    capture_context.enabled_capture_presets = SnapshotPresetList(preset);
+    capture_context.enabled_capture_presets_current_idx = 0;
+    capture_context.active_snapshot_preset_request_id = 0; // no assigned callback for recording
 
     /// TODO: check for any ffmpeg/webp initialization errors
     capture_manager.startCapture(config);
@@ -806,6 +812,8 @@ void MainWindow::beginRecording(const CapturePreset& preset, const char* rel_pat
 void MainWindow::_beginSnapshot(const char* filepath [[maybe_unused]], IVec2 res)
 {
     // begin snapshot with provided args (lowest level, no awareness of presets)
+
+    CaptureManager& capture_manager = capture_context.manager();
 
     assert(!capture_manager.isRecording());
     assert(!capture_manager.isSnapshotting());
@@ -820,10 +828,10 @@ void MainWindow::_beginSnapshot(const char* filepath [[maybe_unused]], IVec2 res
     record.toggled = false;
 
     // don't capture until simulation is ready to draw at the new resolution
-    new_frame_prepared = false;
+    capture_context.new_frame_prepared = false;
 
     CaptureConfig config;
-    config.format = getSettingsConfig()->getSnapshotFormat();
+    config.format = capture_context.settings().getSnapshotFormat();
     config.resolution = res;
     config.quality = 100.0f;
     config.lossless = true;
@@ -851,18 +859,18 @@ void MainWindow::beginSnapshot(const CapturePreset& preset, const char* rel_path
 }
 void MainWindow::beginSnapshotList(const SnapshotPresetList& presets, const char* rel_path_fmt, int request_id)
 {
-    enabled_capture_presets = presets.filterSupported(getSettingsConfig()->default_ssaa);
+    capture_context.enabled_capture_presets = presets.filterSupported(capture_context.settings().default_ssaa);
 
-    if (enabled_capture_presets.size() == 0)
+    if (capture_context.enabled_capture_presets.size() == 0)
     {
         blPrint("No supported presets to snapshot. Aborting.\n");
         return;
     }
     
-    is_snapshotting_list = true;
-    enabled_capture_presets_current_idx = 0;
-    active_capture_rel_path_fmt = rel_path_fmt;
-    active_snapshot_preset_request_id = request_id;
+    capture_context.is_snapshotting_list = true;
+    capture_context.enabled_capture_presets_current_idx = 0;
+    capture_context.active_capture_rel_path_fmt = rel_path_fmt;
+    capture_context.active_snapshot_preset_request_id = request_id;
 
     // Determine snapshot group index for this batch for the target directory (ignored on web)
     #ifndef BL_WEB_BUILD
@@ -871,16 +879,20 @@ void MainWindow::beginSnapshotList(const SnapshotPresetList& presets, const char
     fs::path dir = getPreferredCapturesDirectory();                        // e.g. "C:/dev/bitloop-gallery/captures/"
     dir /= project_worker()->getCurrentProject()->getProjectInfo()->name;  // e.g. "C:/dev/bitloop-gallery/captures/Mandelbrot/"
     dir /= "image";                                                        // e.g. "C:/dev/bitloop-gallery/captures/Mandelbrot/image/"
-    shared_batch_fileindex = getHighestCaptureIndex(dir.string(), rel_path_fmt) + 1;
+    capture_context.shared_batch_fileindex = getHighestCaptureIndex(dir.string(), rel_path_fmt) + 1;
     #else
-    shared_batch_fileindex = 0;
+    capture_context.shared_batch_fileindex = 0;
     #endif
 
-    beginSnapshot(enabled_capture_presets[enabled_capture_presets_current_idx], active_capture_rel_path_fmt.c_str(), shared_batch_fileindex);
+    beginSnapshot(
+        capture_context.enabled_capture_presets[capture_context.enabled_capture_presets_current_idx],
+        capture_context.active_capture_rel_path_fmt.c_str(),
+        capture_context.shared_batch_fileindex);
 }
 void MainWindow::endRecording()
 {
     // signal to capture_manager to finish, so isCaptureToMemoryComplete()==true below
+    CaptureManager& capture_manager = capture_context.manager();
     if (capture_manager.isRecording())
     {
         // called immediately when end recording signalled, even if current frame hasn't finished encoding
@@ -901,6 +913,8 @@ void MainWindow::checkCaptureComplete()
 {
     static bool show_error_box = false;
     ImGui::DrawMessageBox("Capture Error", &show_error_box, "Reason: Undetermined", scale_size(350, 170));
+
+    CaptureManager& capture_manager = capture_context.manager();
 
     bool captured_to_memory = false;
     bool error = false;
@@ -932,15 +946,15 @@ void MainWindow::checkCaptureComplete()
                 if (capture_manager.format() == CaptureFormat::WEBP_SNAPSHOT)
                 {
                     // do we have another preset to capture?
-                    enabled_capture_presets_current_idx++;
-                    if (enabled_capture_presets_current_idx < enabled_capture_presets.size())
+                    capture_context.enabled_capture_presets_current_idx++;
+                    if (capture_context.enabled_capture_presets_current_idx < capture_context.enabled_capture_presets.size())
                     {
                         // todo: maybe queue to begin capture at more suitable time
                         queueMainWindowCommand({ MainWindowCommandType::BEGIN_SNAPSHOT_ACTIVE_PRESET });
                     }
                     else
                     {
-                        is_snapshotting_list = false;
+                        capture_context.is_snapshotting_list = false;
                     }
                 }
             }
@@ -982,6 +996,27 @@ void MainWindow::checkCaptureComplete()
     }
 }
 
+void MainWindow::handleCaptureCommand(CaptureCommandEvent e)
+{
+    switch (e.type)
+    {
+    case CaptureCommandType::BEGIN_SNAPSHOT_PRESET_LIST:
+        beginSnapshotList(
+            e.snapshot_args.presets,
+            e.snapshot_args.rel_path_fmt.c_str(),
+            e.snapshot_args.request_id);
+        break;
+
+    case CaptureCommandType::BEGIN_RECORDING:
+        beginRecording(capture_context.settings().enabledVideoPreset(), "clip%d_%s");
+        break;
+
+    case CaptureCommandType::END_RECORDING:
+        endRecording();
+        break;
+    }
+}
+
 void MainWindow::handleCommand(MainWindowCommandEvent e)
 {
     // handle commands which can be initiated by both GUI thread & project-worker thread
@@ -1009,14 +1044,14 @@ void MainWindow::handleCommand(MainWindowCommandEvent e)
         pause.enabled = true;
 
         record.enabled = true; // may already be recording, but enable in case we're starting new project
-        snapshot.enabled = !capture_manager.isRecording(); // don't re-enable snapshot button if we're still recording (i.e. resuming)
+        snapshot.enabled = !capture_context.manager().isRecording(); // don't re-enable snapshot button if we're still recording (i.e. resuming)
 
         static bool first = true;
         if (first)
         {
             // set initial preferred folder once
             #ifndef BL_WEB_BUILD
-            getSettingsConfig()->capture_dir = getPreferredCapturesDirectory();
+            capture_context.settings().capture_dir = getPreferredCapturesDirectory();
             #endif
 
             first = false;
@@ -1045,32 +1080,17 @@ void MainWindow::handleCommand(MainWindowCommandEvent e)
         snapshot.enabled = false; // only allow snapshot while project running
         break;
 
-    case MainWindowCommandType::BEGIN_SNAPSHOT_PRESET_LIST:
-        if (e.payload.has_value())
-        {
-            SnapshotPresetsArgs payload = std::any_cast<SnapshotPresetsArgs>(e.payload);
-            beginSnapshotList(payload.presets, payload.rel_path_fmt.c_str(), payload.request_id); // e.g. "backgrounds/seahorse_valley"
-        }
-        else
-            beginSnapshotList(getSettingsConfig()->enabledImagePresets(), "snap%d_%s", 0);
-        break;
-
     case MainWindowCommandType::BEGIN_SNAPSHOT_ACTIVE_PRESET:
     {
         // "private" command triggered on completing a snapshot - triggers a snapshot on the next batch preset
         SnapshotPresetList presets;
-        presets.add(enabled_capture_presets[enabled_capture_presets_current_idx]);
-        beginSnapshot(enabled_capture_presets[enabled_capture_presets_current_idx], active_capture_rel_path_fmt.c_str(), shared_batch_fileindex);
+        presets.add(capture_context.enabled_capture_presets[capture_context.enabled_capture_presets_current_idx]);
+        beginSnapshot(
+            capture_context.enabled_capture_presets[capture_context.enabled_capture_presets_current_idx],
+            capture_context.active_capture_rel_path_fmt.c_str(),
+            capture_context.shared_batch_fileindex);
     }
     break;
-
-    case MainWindowCommandType::BEGIN_RECORDING:
-        beginRecording(getSettingsConfig()->enabledVideoPreset(), "clip%d_%s");
-        break;
-
-    case MainWindowCommandType::END_RECORDING:
-        endRecording();
-        break;
     }
 }
 
@@ -1098,6 +1118,18 @@ void MainWindow::drawToolbarButton(ImDrawList* drawList, ImVec2 pos, ImVec2 size
     }
     else if (strcmp(symbol, "record") == 0) {
         drawList->AddCircleFilled(ImVec2(cx, cy), r, color);
+    }
+    else if (strcmp(symbol, "folder") == 0) {
+        const float u = ImMin(size.x, size.y);
+        const float t = ImClamp(u * 0.06f, 1.0f, 3.0f);
+        const ImVec2 outline[] = {
+            {cx - u * 0.32f, cy - u * 0.16f}, {cx - u * 0.32f, cy - u * 0.28f},
+            {cx - u * 0.08f, cy - u * 0.28f}, {cx + u * 0.04f, cy - u * 0.16f},
+            {cx + u * 0.32f, cy - u * 0.16f}, {cx + u * 0.32f, cy + u * 0.25f},
+            {cx - u * 0.32f, cy + u * 0.25f}
+        };
+        drawList->AddPolyline(outline, IM_ARRAYSIZE(outline), color, ImDrawFlags_Closed, t);
+        drawList->AddLine(ImVec2(cx - u * 0.32f, cy - u * 0.06f), ImVec2(cx + u * 0.32f, cy - u * 0.06f), color, t);
     }
     else if (strcmp(symbol, "snapshot") == 0) {
         cy += r * 0.2f;
@@ -1202,7 +1234,7 @@ void MainWindow::populateToolbar()
         {
             // not paused/resuming - begin recording immediately if record button "on" so we start capturing from the very first frame
             if (record.toggled)
-                beginRecording(getSettingsConfig()->enabledVideoPreset(), "clip%d_%s");
+                beginRecording(capture_context.settings().enabledVideoPreset(), "clip%d_%s");
         }
 
         project_worker()->startProject();
@@ -1241,7 +1273,7 @@ void MainWindow::populateToolbar()
                 if (!record.toggled)
                 {
                     // Start recording
-                    beginRecording(getSettingsConfig()->enabledVideoPreset(), "clip%d_%s");
+                    beginRecording(capture_context.settings().enabledVideoPreset(), "clip%d_%s");
                 }
                 else
                 {
@@ -1261,10 +1293,32 @@ void MainWindow::populateToolbar()
     ImGui::SameLine();
     if (toolbarButton("##snapshot", "snapshot", snapshot, ImVec2(size, size)))
     {
-        beginSnapshotList(getSettingsConfig()->enabledImagePresets(), "snap%d_%s", 0);
+        beginSnapshotList(capture_context.settings().enabledImagePresets(), "snap%d_%s", 0);
     }
 
-    if (getSettingsConfig()->show_fps)
+    #ifndef BL_WEB_BUILD
+    if (platform()->isDesktopNative())
+    {
+        ImGui::SameLine();
+        const ToolbarButtonState captureFolder = {
+            ImVec4(0.3f, 0.3f, 0.3f, 1.0f), ImVec4(0.3f, 0.3f, 0.3f, 1.0f), ImVec4(0.8f, 0.8f, 0.8f, 1.0f),
+            project_worker()->hasCurrentProject()
+        };
+        if (toolbarButton("##open_capture_folder", "folder", captureFolder, ImVec2(size, size)))
+        {
+            const auto directory = getProjectSnapshotsDir().parent_path();
+            std::error_code error;
+            std::filesystem::create_directories(directory, error);
+            std::string message;
+            if (error) message = "Could not create the capture folder: " + error.message();
+            else if (!platform()->openDirectory(directory)) message = SDL_GetError();
+            if (!message.empty()) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Open capture folder", message.c_str(), platform()->sdlWindow());
+        }
+        ImGui::SetItemTooltip("Open capture folder");
+    }
+    #endif
+
+    if (capture_context.settings().show_fps)
     {
         ImGui::SameLine();
 
@@ -1300,11 +1354,13 @@ void MainWindow::populateProjectTreeNodeRecursive(ProjectInfoNode& node, int& i,
             project_worker()->setActiveProject(node.project_info->sim_uid);
             project_worker()->startProject();
         }
-        //ImGui::SameLine();
-        //if (ImGui::Button("[...]"))
-        //{
-        //    project_worker()->setActiveProject(node.project_info->sim_uid);
-        //}
+        #if 1
+        ImGui::SameLine();
+        if (ImGui::Button("[...]"))
+        {
+            project_worker()->setActiveProject(node.project_info->sim_uid);
+        }
+        #endif
     }
     else
     {
@@ -1452,8 +1508,24 @@ bool MainWindow::manageDockingLayout()
             &dock_main_id
         );
 
+
         if (ImGuiDockNode* n = ImGui::DockBuilderGetNode(dock_sidebar))
             n->LocalFlags |= ImGuiDockNodeFlags_AutoHideTabBar;
+
+        bool support_timeline = !vertical_layout && !platform()->isMobile();
+        ImGuiID dock_timeline;
+
+        if (support_timeline)
+        {
+            dock_timeline = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Up, 0.2f, nullptr, &dock_main_id);
+            if (ImGuiDockNode* n = ImGui::DockBuilderGetNode(dock_timeline))
+                n->LocalFlags |= ImGuiDockNodeFlags_AutoHideTabBar;
+        }
+        //else
+        //{
+        //    ImGui::DockBuilderRemoveNode(dock_timeline);
+        //}
+
         //if (ImGuiDockNode* n = ImGui::DockBuilderGetNode(dock_main_id))
         //    n->LocalFlags |= ImGuiDockNodeFlags_AutoHideTabBar;
 
@@ -1461,7 +1533,9 @@ bool MainWindow::manageDockingLayout()
         ImGui::DockBuilderDockWindow("Active",      dock_sidebar);  // dock to sidebar
         ImGui::DockBuilderDockWindow("Debug",       dock_sidebar);  // dock to sidebar
         ImGui::DockBuilderDockWindow("Settings",    dock_sidebar);  // dock to sidebar
-        ImGui::DockBuilderDockWindow("Viewport",    dock_main_id);  // dock to window
+        if (support_timeline)
+            ImGui::DockBuilderDockWindow("Timeline",    dock_timeline); // dock to top of main window
+        ImGui::DockBuilderDockWindow("Viewport",    dock_main_id);  // dock to main window
         
         ImGui::DockBuilderFinish(dockspace_id);
     }
@@ -1529,6 +1603,12 @@ void MainWindow::populateExpandedLayout()
 }
 void MainWindow::populateViewport(bool& projectDrawn)
 {
+    {
+        std::vector<CaptureCommandEvent> commands = capture_context.takeQueuedCommands();
+        for (CaptureCommandEvent& command : commands)
+            handleCaptureCommand(command);
+    }
+
     /// todo: Make more thread-safe by only handling commands when we draw? (where both GUI and live buffers are unused)
     ///       As long as you queue commands for project_worker, you're safe here, but if invoke a project callback directly
     ///       e.g. onBeginSnapshot, there's a chance the project could still be mutating live buffer
@@ -1554,18 +1634,21 @@ void MainWindow::populateViewport(bool& projectDrawn)
     {
         client_size = ImGui::GetContentRegionAvail();
 
+        CaptureManager& capture_manager = capture_context.manager();
+        SettingsConfig& settings = capture_context.settings();
+
         bool is_capturing = capture_manager.isCapturing();        
         if (!is_capturing)
         {
             // if capturing, lock "viewport" preset resolution until finished
-            SnapshotPresetList& presets = getSnapshotPresetManager()->allPresets();
-            if (presets[0].setResolution(client_size))
-                getSettingsConfig()->updateRecordBitrate();
+            SnapshotPresetList& presets = capture_context.presetManager().allPresets();
+            if (presets[0].setResolution((int)client_size.x, (int)client_size.y))
+                settings.updateRecordBitrate();
         }
 
-        assert(active_preset != nullptr);
+        assert(capture_context.active_preset != nullptr);
 
-        if (changed_size)
+        if (capture_context.changed_size)
         {
             canvas.begin(0.05f, 0.05f, 0.1f, 1.0f);
             canvas.setFillStyle(0, 0, 0);
@@ -1596,30 +1679,33 @@ void MainWindow::populateViewport(bool& projectDrawn)
         // returns true if preprocessor texture was needed
         auto preprocessFrame = [&](bool capturing_frame) -> bool
         {
-            if (!capturing_frame && active_ssaa == 1 && active_sharpen == 0)
+            if (!capturing_frame && capture_context.active_ssaa == 1 && capture_context.active_sharpen == 0)
             {
                 // no preprocessing/flipping needed, just copy canvas to preprocessed_frame
-                canvas.readPixels(preprocessed_frame);
+                canvas.readPixels(capture_context.preprocessed_frame);
                 return false;
             }
 
             // preprocess frame before encoding
             CapturePreprocessParams params{};
-            params.src_resolution = active_canvas_size;
-            params.dst_resolution = active_target_size;
-            params.ssaa = active_ssaa;
-            params.sharpen = active_sharpen;
+            params.src_resolution = capture_context.active_canvas_size;
+            params.dst_resolution = capture_context.active_target_size;
+            params.ssaa = capture_context.active_ssaa;
+            params.sharpen = capture_context.active_sharpen;
             params.flip_y = true;
 
             if (capturing_frame)
-                preprocessor.preprocessToFrame(canvas.texture(), params, preprocessed_frame);
+                capture_context.preprocessor.preprocessToFrame(canvas.texture(), params, capture_context.preprocessed_frame);
             else
-                preprocessor.preprocessToTexture(canvas.texture(), params);
+                capture_context.preprocessor.preprocessToTexture(canvas.texture(), params);
 
             return true;
         };
 
-        bool preprocess_frame = (changed_scale || changed_size || changed_sharpening);
+        bool preprocess_frame = (
+            capture_context.changed_scale ||
+            capture_context.changed_size ||
+            capture_context.changed_sharpening);
         if (need_draw)
         {
             // Draw the fresh frame
@@ -1642,7 +1728,10 @@ void MainWindow::populateViewport(bool& projectDrawn)
 
                 worker_fps_timer.tick();
 
-                bool capturing_frame = capture_manager.isCapturing() && permit_frame_capture && new_frame_prepared;
+                bool capturing_frame =
+                    capture_manager.isCapturing() &&
+                    capture_context.permit_frame_capture &&
+                    capture_context.new_frame_prepared;
                 if (canvas.isDirty() || capturing_frame)
                 {
                     canvas.begin(0.05f, 0.05f, 0.1f, 1.0f);
@@ -1657,26 +1746,29 @@ void MainWindow::populateViewport(bool& projectDrawn)
 
                 // preprocess canvas on ssaa/sharpen change OR project signals it redrew (before encoding frame)
                 if (preprocess_frame)
-                    use_preprocessor_texture = preprocessFrame(capturing_frame);
+                    capture_context.use_preprocessor_texture = preprocessFrame(capturing_frame);
 
                 if (project_worker()->hasRunningProject())
                 {
                     // Even if not recording, behave as though we are for consistency
-                    captured_last_frame = permit_frame_capture;
+                    capture_context.captured_last_frame = capture_context.permit_frame_capture;
 
                     if (capturing_frame)
                     {
                         // give project a chance to attach metadata to the frame before sending it to the encoder
-                        CapturePreset preset_info = *active_preset;
+                        CapturePreset preset_info = *capture_context.active_preset;
                         preset_info.setVideo(capture_manager.isRecording()); // Tell user whether preset is being used a video or snapshot
-                        project_worker()->onEncodeFrame(preprocessed_frame, active_snapshot_preset_request_id, preset_info);
+                        project_worker()->onEncodeFrame(
+                            capture_context.preprocessed_frame,
+                            capture_context.active_snapshot_preset_request_id,
+                            preset_info);
 
                         // send to encoder
-                        capture_manager.encodeFrame(preprocessed_frame);
+                        capture_manager.encodeFrame(capture_context.preprocessed_frame);
                     }
 
                     // Force worker to tell us when it wants to encode a new frame
-                    permit_frame_capture = false;
+                    capture_context.permit_frame_capture = false;
                 }
 
                 shared_sync.frame_ready_to_draw = false;
@@ -1684,7 +1776,7 @@ void MainWindow::populateViewport(bool& projectDrawn)
 
                 // update settings for the next frame (and flag that we can correctly capture the next frame)
                 updateActivePreset();
-                new_frame_prepared = true; // frame should be ready to capture after next worker draw call
+                capture_context.new_frame_prepared = true; // frame should be ready to capture after next worker draw call
             }
 
             // Let worker continue
@@ -1695,7 +1787,7 @@ void MainWindow::populateViewport(bool& projectDrawn)
         else
         {
             if (preprocess_frame)
-                use_preprocessor_texture = preprocessFrame(false);
+                capture_context.use_preprocessor_texture = preprocessFrame(false);
 
             // update settings for the next frame
             updateActivePreset();
@@ -1713,11 +1805,11 @@ void MainWindow::populateViewport(bool& projectDrawn)
         float ox = 0, oy = 0;
 
         // If image small enough to render at 100% scale with no resizing?
-        if (!getSettingsConfig()->fill_viewport)
+        if (!settings.fill_viewport)
         {
             needs_scaling =
-                active_target_size.x > client_size.x ||
-                active_target_size.y > client_size.y;
+                capture_context.active_target_size.x > client_size.x ||
+                capture_context.active_target_size.y > client_size.y;
         }
         else
         {
@@ -1727,7 +1819,7 @@ void MainWindow::populateViewport(bool& projectDrawn)
         if (needs_scaling)
         {
             float client_aspect = (client_size.x / client_size.y);
-            float canvas_aspect = ((float)active_target_size.x / (float)active_target_size.y);
+            float canvas_aspect = ((float)capture_context.active_target_size.x / (float)capture_context.active_target_size.y);
 
             if (canvas_aspect > client_aspect)
             {
@@ -1742,10 +1834,10 @@ void MainWindow::populateViewport(bool& projectDrawn)
         }
         else
         {
-            ox = 0.5f * (client_size.x - active_target_size.x);
-            oy = 0.5f * (client_size.y - active_target_size.y);
-            sw = (float)active_target_size.x;
-            sh = (float)active_target_size.y;
+            ox = 0.5f * (client_size.x - capture_context.active_target_size.x);
+            oy = 0.5f * (client_size.y - capture_context.active_target_size.y);
+            sw = (float)capture_context.active_target_size.x;
+            sh = (float)capture_context.active_target_size.y;
         }
 
         image_pos += { ox, oy };
@@ -1755,25 +1847,117 @@ void MainWindow::populateViewport(bool& projectDrawn)
      
         ImGui::SetCursorScreenPos(ImFloor(image_pos));
 
-        if (use_preprocessor_texture)
+        if (capture_context.use_preprocessor_texture)
             // use the preprocessor's output texture (no flip needed)
-            ImGui::Image((ImTextureID)preprocessor.outputTexture(), image_size, ImVec2(0, 0), ImVec2(1, 1));
+            ImGui::Image((ImTextureID)capture_context.preprocessor.outputTexture(), image_size, ImVec2(0, 0), ImVec2(1, 1));
         else
             // render canvas texture directly (flip y)
             ImGui::Image(canvas.texture(), image_size, ImVec2(0, 1), ImVec2(1, 0));
 
         // check if anything that requires updating the canvas/frame preprocessor
-        changed_size = canvas.resize(active_canvas_size.x, active_canvas_size.y);
-        changed_scale = canvas.setGlobalScale(platform()->dpr() * active_ssaa);
-        changed_sharpening = active_sharpen != old_sharpen;
+        capture_context.changed_size = canvas.resize(capture_context.active_canvas_size.x, capture_context.active_canvas_size.y);
+        capture_context.changed_scale = canvas.setGlobalScale(platform()->dpr() * capture_context.active_ssaa);
+        capture_context.changed_sharpening = capture_context.active_sharpen != capture_context.old_sharpen;
 
-        old_sharpen = active_sharpen;
+        capture_context.old_sharpen = capture_context.active_sharpen;
 
         viewport_hovered = ImGui::IsWindowHovered();
     }
     ImGui::End();
     ImGui::PopStyleVar();
 }
+void MainWindow::populateTimeline(std::int64_t currentFrame, bool playing)
+{
+    if (ImGui::Begin("Timeline", nullptr, window_flags))
+    {
+        ImGui::TextUnformatted("Time (frames)");
+
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        const ImVec2 size = ImGui::GetContentRegionAvail();
+        if (size.x > 0.0f && size.y > 0.0f)
+        {
+            const float layerWidth = std::min(scale_size(140.0f), size.x * 0.35f);
+            const float rowHeight = ImGui::GetFrameHeight();
+            const float scrollbarHeight = std::min(ImGui::GetStyle().ScrollbarSize, size.y);
+            const ImVec2 end = origin + ImVec2(size.x, size.y - scrollbarHeight);
+            const float rulerX = origin.x + layerWidth;
+            const ImVec2 padding = ImGui::GetStyle().FramePadding;
+            const ImU32 textColor = ImGui::GetColorU32(ImGuiCol_Text);
+            const ImU32 borderColor = ImGui::GetColorU32(ImGuiCol_Border);
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+            ImS64 frameCount = currentFrame + 1;
+            for (const TimelineLayer& layer : timelineLayers)
+                frameCount = std::max(frameCount, static_cast<ImS64>(layer.frames.size()));
+            const std::string lastFrameLabel = std::to_string(frameCount - 1);
+            const float frameWidth = std::max(scale_size(12.0f), (ImGui::CalcTextSize(lastFrameLabel.c_str()).x + padding.x * 2.0f) / 5.0f);
+            const ImS64 visibleFrames = std::max<ImS64>(1, static_cast<ImS64>(std::floor((end.x - rulerX) / frameWidth)));
+            frameCount = std::max(frameCount, visibleFrames);
+            timelineScrollFrame = std::clamp(timelineScrollFrame, ImS64{ 0 }, frameCount - visibleFrames);
+            if (playing && currentFrame != timelinePreviousFrame)
+            {
+                const ImS64 firstVisibleFrame = std::max<ImS64>(0, currentFrame - visibleFrames + 1);
+                timelineScrollFrame = std::clamp(timelineScrollFrame, firstVisibleFrame, static_cast<ImS64>(currentFrame));
+            }
+            ImGui::ScrollbarEx(ImRect(ImVec2(rulerX, end.y), origin + size), ImGui::GetID("##timelineScroll"),
+                ImGuiAxis_X, &timelineScrollFrame, visibleFrames, frameCount);
+
+            drawList->PushClipRect(origin, end, true);
+            drawList->AddRectFilled(origin, ImVec2(rulerX, end.y), ImGui::GetColorU32(ImGuiCol_ChildBg));
+            drawList->AddRectFilled(origin, ImVec2(end.x, origin.y + rowHeight), ImGui::GetColorU32(ImGuiCol_FrameBg));
+
+            drawList->PushClipRect(origin, ImVec2(rulerX, end.y), true);
+            drawList->AddText(origin + padding, textColor, "Layers");
+            for (size_t layer = 0; layer < timelineLayers.size(); ++layer)
+            {
+                const float y = origin.y + rowHeight * static_cast<float>(layer + 1);
+                if (y >= end.y)
+                    break;
+                drawList->AddText(ImVec2(origin.x + padding.x, y + padding.y), textColor, timelineLayers[layer].name.c_str());
+            }
+            drawList->PopClipRect();
+
+            drawList->PushClipRect(ImVec2(rulerX, origin.y), end, true);
+            const int visibleColumns = static_cast<int>(std::ceil((end.x - rulerX) / frameWidth));
+            if (currentFrame >= timelineScrollFrame && currentFrame - timelineScrollFrame < visibleColumns)
+            {
+                const float x = rulerX + static_cast<float>(currentFrame - timelineScrollFrame) * frameWidth;
+                drawList->AddRectFilled(ImVec2(x, origin.y), ImVec2(x + frameWidth, end.y), IM_COL32(255, 40, 40, 70));
+                drawList->AddRect(ImVec2(x, origin.y), ImVec2(x + frameWidth, end.y), IM_COL32(255, 40, 40, 255));
+            }
+            for (int column = 0; column < visibleColumns; ++column)
+            {
+                const ImS64 frame = timelineScrollFrame + column;
+                const float x = rulerX + (static_cast<float>(column) + 0.5f) * frameWidth;
+                const bool majorTick = frame % 5 == 0;
+                const float tickHeight = scale_size(majorTick ? 5.0f : 2.0f);
+                drawList->AddLine(ImVec2(x, origin.y + rowHeight - tickHeight), ImVec2(x, origin.y + rowHeight), borderColor);
+                if (majorTick)
+                {
+                    const std::string label = std::to_string(frame);
+                    const float labelWidth = ImGui::CalcTextSize(label.c_str()).x;
+                    drawList->AddText(ImVec2(x - labelWidth * 0.5f, origin.y), textColor, label.c_str());
+                }
+            }
+            drawList->PopClipRect();
+
+            for (size_t row = 0; row <= timelineLayers.size(); ++row)
+            {
+                const float y = origin.y + rowHeight * static_cast<float>(row + 1);
+                if (y >= end.y)
+                    break;
+                drawList->AddLine(ImVec2(origin.x, y), ImVec2(end.x, y), borderColor);
+            }
+            drawList->AddLine(ImVec2(rulerX, origin.y), ImVec2(rulerX, end.y), borderColor);
+            drawList->PopClipRect();
+
+            ImGui::Dummy(size);
+            timelinePreviousFrame = currentFrame;
+        }
+    }
+    ImGui::End();
+}
+
 void MainWindow::populateUI()
 {
     if (!manageDockingLayout())
@@ -1834,6 +2018,10 @@ void MainWindow::populateUI()
 
                 populateOverlay();
             }
+
+            const ProjectBase* currentProject = project_worker()->getCurrentProject();
+            const bool playing = currentProject && currentProject->isActive() && !currentProject->isPaused();
+            populateTimeline(currentProject ? currentProject->currentFrameIndex() : 0, playing);
 
             // Draw viewport
             {
@@ -1951,9 +2139,9 @@ void MainWindow::populateUI()
 
 const CapturePreset* MainWindow::determineRenderedPreset() const
 {
-    bool is_capturing = capture_manager.isCapturing();
+    bool is_capturing = capture_context.manager().isCapturing();
 
-    const SnapshotPresetList& presets = getSnapshotPresetManager()->allPresets();
+    const SnapshotPresetList& presets = capture_context.presetManager().allPresets();
     int selected_preset_idx = settings_panel.getSelectedPresetIndex(); //  selected "allPresets" index
 
     const CapturePreset* ret = nullptr; // first preset always represents viewport. Use by default
@@ -1961,8 +2149,8 @@ const CapturePreset* MainWindow::determineRenderedPreset() const
     if (is_capturing)
     {
         // *always* use capture preset if capturing, even if "preview" mode on
-        assert(enabled_capture_presets_current_idx < enabled_capture_presets.size());
-        ret = &enabled_capture_presets[enabled_capture_presets_current_idx];
+        assert(capture_context.enabled_capture_presets_current_idx < capture_context.enabled_capture_presets.size());
+        ret = &capture_context.enabled_capture_presets[capture_context.enabled_capture_presets_current_idx];
     }
     else
     {
@@ -1979,22 +2167,22 @@ const CapturePreset* MainWindow::determineRenderedPreset() const
 bool MainWindow::updateActivePreset()
 {
     const CapturePreset* next_preset = determineRenderedPreset();
-    int   next_ssaa        = (next_preset->getSSAA() > 0)       ? next_preset->getSSAA()       : getSettingsConfig()->default_ssaa;
-    float next_sharpen     = (next_preset->getSharpening() > 0) ? next_preset->getSharpening() : getSettingsConfig()->default_sharpen;
+    int   next_ssaa        = (next_preset->getSSAA() > 0)       ? next_preset->getSSAA()       : capture_context.settings().default_ssaa;
+    float next_sharpen     = (next_preset->getSharpening() > 0) ? next_preset->getSharpening() : capture_context.settings().default_sharpen;
     IVec2 next_canvas_size = next_preset->getResolution() * next_ssaa;
     IVec2 next_target_size = next_preset->getResolution();
 
-    if (next_preset      != active_preset ||
-        next_ssaa        != active_ssaa ||
-        next_sharpen     != active_sharpen ||
-        next_canvas_size != active_canvas_size ||
-        next_target_size != active_target_size)
+    if (next_preset      != capture_context.active_preset ||
+        next_ssaa        != capture_context.active_ssaa ||
+        next_sharpen     != capture_context.active_sharpen ||
+        next_canvas_size != capture_context.active_canvas_size ||
+        next_target_size != capture_context.active_target_size)
     {
-        active_preset      = next_preset;
-        active_ssaa        = next_ssaa;
-        active_sharpen     = next_sharpen;
-        active_canvas_size = next_canvas_size;
-        active_target_size = next_target_size;
+        capture_context.active_preset      = next_preset;
+        capture_context.active_ssaa        = next_ssaa;
+        capture_context.active_sharpen     = next_sharpen;
+        capture_context.active_canvas_size = next_canvas_size;
+        capture_context.active_target_size = next_target_size;
 
         return true;
     }
@@ -2002,5 +2190,3 @@ bool MainWindow::updateActivePreset()
 }
 
 BL_END_NS
-
-

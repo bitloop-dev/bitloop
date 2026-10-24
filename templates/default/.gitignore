@@ -45,3 +45,12 @@
 **/build/
 out
 /captures
+CMakeUserPresets.json
+
+# Python tooling
+__pycache__/
+*.py[cod]
+
+# Local Codex execution state
+/.codex/plans/
+/.codex/runs/

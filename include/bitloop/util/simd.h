@@ -363,6 +363,50 @@ namespace simd2 {
         inline double y() const { return _y; }
     };
 
+    #ifdef F128_INCLUDED
+    template<class TAG>
+    struct v2<fdd, TAG> {
+        fdd _x, _y;
+
+        static inline v2 set(fdd x, fdd y) { return { x, y }; }
+        static inline v2 load2(const fdd* p) { return set(p[0], p[1]); }
+        static inline v2 load(const fdd* p) { return load2(p); }
+        inline void store2(fdd* p) const { p[0] = _x; p[1] = _y; }
+
+        static inline v2 add(v2 a, v2 b) { return { a._x + b._x, a._y + b._y }; }
+        static inline v2 sub(v2 a, v2 b) { return { a._x - b._x, a._y - b._y }; }
+        static inline v2 mul(v2 a, v2 b) { return { a._x * b._x, a._y * b._y }; }
+        static inline v2 fma(v2 a, v2 b, v2 c) { return { a._x * b._x + c._x, a._y * b._y + c._y }; }
+        static inline fdd dot(v2 a) { return a._x * a._x + a._y * a._y; }
+        static inline v2 cmul(v2 a, v2 b) { return { a._x * b._x - a._y * b._y, a._x * b._y + a._y * b._x }; }
+
+        inline fdd x() const { return _x; }
+        inline fdd y() const { return _y; }
+    };
+    #endif
+
+    #ifdef F256_INCLUDED
+    template<class TAG>
+    struct v2<fqd, TAG> {
+        fqd _x, _y;
+
+        static inline v2 set(fqd x, fqd y) { return { x, y }; }
+        static inline v2 load2(const fqd* p) { return set(p[0], p[1]); }
+        static inline v2 load(const fqd* p) { return load2(p); }
+        inline void store2(fqd* p) const { p[0] = _x; p[1] = _y; }
+
+        static inline v2 add(v2 a, v2 b) { return { a._x + b._x, a._y + b._y }; }
+        static inline v2 sub(v2 a, v2 b) { return { a._x - b._x, a._y - b._y }; }
+        static inline v2 mul(v2 a, v2 b) { return { a._x * b._x, a._y * b._y }; }
+        static inline v2 fma(v2 a, v2 b, v2 c) { return { a._x * b._x + c._x, a._y * b._y + c._y }; }
+        static inline fqd dot(v2 a) { return a._x * a._x + a._y * a._y; }
+        static inline v2 cmul(v2 a, v2 b) { return { a._x * b._x - a._y * b._y, a._x * b._y + a._y * b._x }; }
+
+        inline fqd x() const { return _x; }
+        inline fqd y() const { return _y; }
+    };
+    #endif
+
 } // namespace simd2
 
 BL_END_NS

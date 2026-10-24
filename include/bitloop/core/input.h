@@ -1,19 +1,20 @@
 #pragma once
-#include <SDL3/SDL_mouse.h>
+#include <bitloop/core/types.h>
 
 BL_BEGIN_NS
 
 class Viewport;
 class ProjectBase;
 class CameraNavigator;
+class CameraInfo;
 
 enum struct MouseButton
 {
-    LEFT = SDL_BUTTON_LEFT,
-    WHEEL = SDL_BUTTON_LEFT,
-    RIGHT = SDL_BUTTON_RIGHT,
-    X1 = SDL_BUTTON_X1,
-    X2 = SDL_BUTTON_X2,
+    LEFT = 1,
+    WHEEL = 1,
+    RIGHT = 3,
+    X1 = 4,
+    X2 = 5,
 
     _COUNT = X2
 };
@@ -53,9 +54,9 @@ public:
     f64  client_y = 0;
     f64  stage_x  = 0;
     f64  stage_y  = 0;
-    f128 world_x  = 0.0_dd;
-    f128 world_y  = 0.0_dd;
     int  scroll_delta = 0;
+
+    [[nodiscard]] QDVec2 worldPosition(const CameraInfo& camera) const;
 
     const MouseButtonState& buttonState(MouseButton btn_type) const
     {

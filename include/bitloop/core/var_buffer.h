@@ -1,6 +1,7 @@
 #pragma once
 
 #include "debug.h"
+#include <bitloop/util/hashable.h>
 
 #include <any>
 #include <array>
@@ -17,7 +18,12 @@
 
 template<class U>
 concept VarHasHashMethod = requires(const U & u) {
-    { u.hash() } -> std::convertible_to<std::size_t>;
+    { u.hash() } -> std::same_as<bl::hash_t>;
+};
+
+template<class U>
+concept VarHasAnyHashMethod = requires(const U & u) {
+    u.hash();
 };
 
 template<class T>
@@ -245,27 +251,27 @@ class DoubleBufferedAccessor
 {
 public:
     template<class T, std::enable_if_t<!std::is_array_v<T>, int> = 0>
-    std::remove_const_t<T>& _pull(const T& live_member, bool temp = false, const char* name = nullptr) const
+    std::remove_const_t<T>& _pull(const T& live_member, const char* name = nullptr) const
     {
-        return __target._pull(live_member, temp, name);
+        return __target._pull(live_member, name);
     }
 
     template<class T, std::size_t N>
-    std::array<std::remove_const_t<T>, N>& _pull(const T(&live_member)[N], bool temp = false, const char* name = nullptr) const
+    std::array<std::remove_const_t<T>, N>& _pull(const T(&live_member)[N], const char* name = nullptr) const
     {
-        return __target._pull(live_member, temp, name);
+        return __target._pull(live_member, name);
     }
 
     template<class T, std::enable_if_t<!std::is_array_v<T>, int> = 0>
-    std::remove_const_t<T>& _temp_pull(const T& live_member, const char* name = nullptr) const
+    std::remove_const_t<T> _temp_pull(const T& live_member, const char* name = nullptr) const
     {
-        return __target._pull(live_member, true, name);
+        return __target._temp_pull(live_member, name);
     }
 
     template<class T, std::size_t N>
-    auto& _temp_pull(const T(&live_member)[N], const char* name = nullptr) const
+    auto _temp_pull(const T(&live_member)[N], const char* name = nullptr) const
     {
-        return __target._pull(live_member, true, name);
+        return __target._temp_pull(live_member, name);
     }
 
     template<class T, std::enable_if_t<!std::is_array_v<T>, int> = 0>
@@ -304,10 +310,10 @@ public:
     virtual ~DoubleBufferedAccessor() = default;
 
     // push/pull/scope helpers (single)
-    #define _bl_scoped_one(name)     auto& name = _pull(__target.name, false, #name); __PushGuard<std::remove_reference_t<decltype(__target)>, std::remove_reference_t<decltype(__target.name)>> __push_guard_##name(__target, __target.name)
-    #define _bl_pull_one(name)       auto& name = _pull(__target.name, false, #name)
-    #define _bl_view_one(name)       const auto& name = _pull(__target.name, false, #name)
-    #define _bl_pull_temp_one(name)  auto& name = _temp_pull(__target.name, #name)
+    #define _bl_scoped_one(name)     auto& name = _pull(__target.name, #name); __PushGuard<std::remove_reference_t<decltype(__target)>, std::remove_reference_t<decltype(__target.name)>> __push_guard_##name(__target, __target.name)
+    #define _bl_pull_one(name)       auto& name = _pull(__target.name, #name)
+    #define _bl_view_one(name)       const auto& name = _pull(__target.name, #name)
+    #define _bl_pull_temp_one(name)  auto name = _temp_pull(__target.name, #name)
     #define _bl_push_one(name)       _commit(__target.name)
 
     // push/pull/scope helpers (__VA_ARGS__)
@@ -340,17 +346,15 @@ struct VarBuffer
 
         std::any value_shadow;
 
-        // snapshots for change detection (size_t hash if value has .hash())
+        // snapshots for change detection (full 64-bit hash if value has .hash())
         std::any mark_live;
         std::any mark_shadow;
 
         bool hashable = false;
-        std::size_t(*hash_from_live_fn)(const void*) = nullptr;
-        std::size_t(*hash_from_any_fn)(const std::any&) = nullptr;
+        bl::hash_t(*hash_from_live_fn)(const void*) = nullptr;
+        bl::hash_t(*hash_from_any_fn)(const std::any&) = nullptr;
 
         bool changed = false; // represents "shadow -> live needs applying", "marked" value must not advance while true
-        bool temp = false;
-
         void (*assign_fn)(void*, const std::any&) = nullptr;                 // any -> live
         bool (*equals_fn)(const void*, const std::any&) = nullptr;           // live vs any
         void (*store_from_live_fn)(std::any&, const void*) = nullptr;        // live -> any
@@ -401,11 +405,11 @@ struct VarBuffer
             if (!owner || !live_key) return;
 
             if (hashable && hash_from_live_fn) {
-                const std::size_t h = hash_from_live_fn(live_key);
-                if (auto* p = std::any_cast<std::size_t>(&mark_live))
+                const bl::hash_t h = hash_from_live_fn(live_key);
+                if (auto* p = std::any_cast<bl::hash_t>(&mark_live))
                     *p = h;
                 else
-                    mark_live.template emplace<std::size_t>(h);
+                    mark_live.template emplace<bl::hash_t>(h);
                 return;
             }
 
@@ -423,11 +427,11 @@ struct VarBuffer
             }
 
             if (hashable && hash_from_any_fn) {
-                const std::size_t h = hash_from_any_fn(value_shadow);
-                if (auto* p = std::any_cast<std::size_t>(&mark_shadow))
+                const bl::hash_t h = hash_from_any_fn(value_shadow);
+                if (auto* p = std::any_cast<bl::hash_t>(&mark_shadow))
                     *p = h;
                 else
-                    mark_shadow.template emplace<std::size_t>(h);
+                    mark_shadow.template emplace<bl::hash_t>(h);
                 return;
             }
 
@@ -441,8 +445,8 @@ struct VarBuffer
             if (!mark_live.has_value()) return false;
 
             if (hashable && hash_from_live_fn) {
-                const std::size_t now = hash_from_live_fn(live_key);
-                const std::size_t was = std::any_cast<const std::size_t&>(mark_live);
+                const bl::hash_t now = hash_from_live_fn(live_key);
+                const bl::hash_t was = std::any_cast<const bl::hash_t&>(mark_live);
                 return now != was;
             }
 
@@ -456,8 +460,8 @@ struct VarBuffer
             if (!mark_shadow.has_value())  return false;
 
             if (hashable && hash_from_any_fn) {
-                const std::size_t now = hash_from_any_fn(value_shadow);
-                const std::size_t was = std::any_cast<const std::size_t&>(mark_shadow);
+                const bl::hash_t now = hash_from_any_fn(value_shadow);
+                const bl::hash_t was = std::any_cast<const bl::hash_t&>(mark_shadow);
                 return now != was;
             }
 
@@ -469,8 +473,8 @@ struct VarBuffer
         {
             if (!value_shadow.has_value()) return {};
             std::ostringstream oss;
-            if (hashable)
-                oss << std::any_cast<const std::size_t&>(value_shadow);
+            if (hashable && hash_from_any_fn)
+                oss << hash_from_any_fn(value_shadow);
             else if (print_fn)
                 print_fn(oss, value_shadow);
             return oss.str();
@@ -481,7 +485,7 @@ struct VarBuffer
             if (!mark_shadow.has_value()) return {};
             std::ostringstream oss;
             if (hashable)
-                oss << std::any_cast<const std::size_t&>(mark_shadow);
+                oss << std::any_cast<const bl::hash_t&>(mark_shadow);
             else if (print_fn)
                 print_fn(oss, mark_shadow);
             return oss.str();
@@ -492,7 +496,7 @@ struct VarBuffer
             if (!mark_live.has_value()) return {};
             std::ostringstream oss;
             if (hashable)
-                oss << std::any_cast<const std::size_t&>(mark_live);
+                oss << std::any_cast<const bl::hash_t&>(mark_live);
             else if (print_fn)
                 print_fn(oss, mark_live);
             return oss.str();
@@ -533,6 +537,9 @@ struct VarBuffer
         using Ops = TypeOps<T>;
         using Store = typename Ops::Store;
 
+        static_assert(!VarHasAnyHashMethod<Store> || VarHasHashMethod<Store>,
+            "VarBuffer hash() must return bl::hash_t (the stable 64-bit hash type).");
+
         if (!e.assign_fn)          e.assign_fn = +[](void* dst, const std::any& a) { Ops::assign(dst, a); };
         if (!e.equals_fn)          e.equals_fn = +[](const void* dst, const std::any& a) { return Ops::equals(dst, a); };
         if (!e.store_from_live_fn) e.store_from_live_fn = +[](std::any& dst, const void* src) { Ops::store(dst, src); };
@@ -542,11 +549,11 @@ struct VarBuffer
 
         if constexpr (VarHasHashMethod<Store>) {
             e.hashable = true;
-            e.hash_from_live_fn = +[](const void* src) -> std::size_t {
+            e.hash_from_live_fn = +[](const void* src) -> bl::hash_t {
                 const Store& s = *static_cast<const Store*>(src);
                 return s.hash();
             };
-            e.hash_from_any_fn = +[](const std::any& a) -> std::size_t {
+            e.hash_from_any_fn = +[](const std::any& a) -> bl::hash_t {
                 return std::any_cast<const Store&>(a).hash();
             };
         }
@@ -557,7 +564,7 @@ struct VarBuffer
 
     // scalar pull
     template<class T, std::enable_if_t<!std::is_array_v<T>, int> = 0>
-    std::remove_const_t<T>& _pull(const T& live_member, bool temp = false, const char* name = nullptr) const
+    std::remove_const_t<T>& _pull(const T& live_member, const char* name = nullptr) const
     {
         using Store = std::remove_const_t<T>;
         const void* live_key = static_cast<const void*>(&live_member);
@@ -583,13 +590,12 @@ struct VarBuffer
             e.markLiveValue();
         }
 
-        e.temp = e.temp || temp;
         return *std::any_cast<Store>(&e.value_shadow);
     }
 
     // array pull (T[N])
     template<class T, std::size_t N>
-    std::array<std::remove_const_t<T>, N>& _pull(const T(&live_member)[N], bool temp = false, const char* name = nullptr) const
+    std::array<std::remove_const_t<T>, N>& _pull(const T(&live_member)[N], const char* name = nullptr) const
     {
         using Ops = TypeOps<T[N]>;
         using Store = typename Ops::Store;
@@ -619,7 +625,6 @@ struct VarBuffer
             e.markLiveValue();
         }
 
-        e.temp = e.temp || temp;
         return *std::any_cast<Store>(&e.value_shadow);
     }
 
@@ -703,11 +708,44 @@ struct VarBuffer
         e.changed = e.shadowChanged();
     }
 
-    template<class T>
-    std::remove_const_t<T>& _temp_pull(const T& live_member) const { return _pull(live_member, true); }
+    // Return an untracked UI-local snapshot. If the member is already tracked,
+    // copy its current shadow so temporary reads remain coherent with the UI.
+    // Otherwise copy the live member without registering a persistent entry.
+    template<class T, std::enable_if_t<!std::is_array_v<T>, int> = 0>
+    std::remove_const_t<T> _temp_pull(const T& live_member, const char* name = nullptr) const
+    {
+        using Store = std::remove_const_t<T>;
+        (void)name;
+
+        const void* live_key = static_cast<const void*>(&live_member);
+        auto it = ui_stage.find(live_key);
+        if (it != ui_stage.end() && it->second.value_shadow.has_value())
+            return std::any_cast<const Store&>(it->second.value_shadow);
+
+        return static_cast<const Store&>(live_member);
+    }
 
     template<class T, std::size_t N>
-    auto& _temp_pull(const T(&live_member)[N]) const { return _pull(live_member, true); }
+    std::array<std::remove_const_t<T>, N> _temp_pull(
+        const T(&live_member)[N],
+        const char* name = nullptr) const
+    {
+        using Elem = std::remove_const_t<T>;
+        using Store = std::array<Elem, N>;
+        (void)name;
+
+        const void* live_key = static_cast<const void*>(live_member);
+        auto it = ui_stage.find(live_key);
+        if (it != ui_stage.end() && it->second.value_shadow.has_value())
+            return std::any_cast<const Store&>(it->second.value_shadow);
+
+        Store snapshot{};
+        if constexpr (std::is_trivially_copyable_v<Elem>)
+            std::memcpy(snapshot.data(), live_member, sizeof(Elem) * N);
+        else
+            std::copy(live_member, live_member + N, snapshot.begin());
+        return snapshot;
+    }
 
     // -------- apply / mark / query --------
     void updateLive() { for (auto& kv : ui_stage) kv.second.updateLive(); }

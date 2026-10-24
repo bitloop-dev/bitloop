@@ -1,6 +1,7 @@
 #include <bitloop/imguix/imguix.h>
 #include <bitloop/util/math_util.h>
 
+#include <cstring>
 
 std::ostream& operator<<(std::ostream& os, const ImSpline::Spline& spline)
 {
@@ -14,7 +15,7 @@ std::ostream& operator<<(std::ostream& os, const ImGradient& gradient)
     return os << "Gradient";
 }
 
-// f128 replacements
+// fdd replacements
 
 struct ParsedPrintf {
     bool has_width = false;
@@ -114,7 +115,7 @@ template<typename T>
 static inline T bl_round_to_decimals(int p, T v)
 {
     if (p <= 0) return (T)(int)(v + (v >= (T)0.0 ? (T)0.5 : (T)-0.5));
-    const T s = bl::pow((T)10.0, (T)p);
+    const T s = (T)bl::pow(10, p);
     return (T)((int)(v * s + (v >= (T)0.0 ? (T)0.5 : (T)-0.5))) / s;
 }
 
@@ -494,15 +495,15 @@ bool SliderScalar_TowardMax(const char* label, ImGuiDataType data_type, void* p_
     return value_changed;
 }
 
-using bl::f128;
-using bl::operator""_dd;
+using bl::fdd;
+using namespace bl::literals;
 
 static const float DRAG_MOUSE_THRESHOLD_FACTOR = 0.50f;
 
-static inline f128 ImAbs128(f128 x) { return x < 0 ? -x : x; }
-static inline f128 ImLog128(f128 x) { using std::log; return log(x); }
-static inline f128 ImPow128(f128 a, f128 b) { using std::pow; return pow(a, b); }
-static inline f128 ImClamp128(f128 v, f128 mn, f128 mx)
+static inline fdd ImAbs128(fdd x) { return x < 0 ? -x : x; }
+static inline fdd ImLog128(fdd x) { using std::log; return log(x); }
+static inline fdd ImPow128(fdd a, fdd b) { using std::pow; return pow(a, b); }
+static inline fdd ImClamp128(fdd v, fdd mn, fdd mx)
 {
     if (v < mn) return mn;
     if (v > mx) return mx;
@@ -510,30 +511,30 @@ static inline f128 ImClamp128(f128 v, f128 mn, f128 mx)
 }
 
 // Round to decimal precision parsed from printf-like format (precision only)
-static inline f128 RoundScalarWithFormat128(const char* fmt, f128 v) {
+static inline fdd RoundScalarWithFormat128(const char* fmt, fdd v) {
     if (!fmt) return v;
     const char* s = ImParseFormatFindStart(fmt);
     if (s[0] != '%' || s[1] == '%') return v;
     int prec = ImParseFormatPrecision128(s, 3);
     if (prec <= 0) return v;
-    return round_to_decimals(v, prec);
+    return round_decimals(v, prec);
 }
 
 // value -> [0,1] ratio on drag/slider (log-support)
-static float ScaleRatioFromValue_flt128(f128 v, f128 v_min, f128 v_max, bool is_logarithmic, float logarithmic_zero_epsilon)
+static float ScaleRatioFromValue_flt128(fdd v, fdd v_min, fdd v_max, bool is_logarithmic, float logarithmic_zero_epsilon)
 {
     if (v_min == v_max) return 0.0f;
 
-    f128 v_clamped = (v_min < v_max) ? ImClamp128(v, v_min, v_max) : ImClamp128(v, v_max, v_min);
+    fdd v_clamped = (v_min < v_max) ? ImClamp128(v, v_min, v_max) : ImClamp128(v, v_max, v_min);
 
     if (is_logarithmic)
     {
         bool flipped = v_max < v_min;
-        if (flipped) { f128 t = v_min; v_min = v_max; v_max = t; }
+        if (flipped) { fdd t = v_min; v_min = v_max; v_max = t; }
 
-        f128 eps = f128(logarithmic_zero_epsilon);
-        f128 vminf = (ImAbs128(v_min) < eps) ? (v_min < 0 ? -eps : eps) : v_min;
-        f128 vmaxf = (ImAbs128(v_max) < eps) ? (v_max < 0 ? -eps : eps) : v_max;
+        fdd eps = fdd(logarithmic_zero_epsilon);
+        fdd vminf = (ImAbs128(v_min) < eps) ? (v_min < 0 ? -eps : eps) : v_min;
+        fdd vmaxf = (ImAbs128(v_max) < eps) ? (v_max < 0 ? -eps : eps) : v_max;
 
         if (v_min == 0 && v_max < 0) vminf = -eps;
         else if (v_max == 0 && v_min < 0) vmaxf = -eps;
@@ -563,19 +564,19 @@ static float ScaleRatioFromValue_flt128(f128 v, f128 v_min, f128 v_max, bool is_
 }
 
 // [0,1] ratio -> value (log-support)
-static f128 ScaleValueFromRatio_flt128(float t, f128 v_min, f128 v_max, bool is_logarithmic, float logarithmic_zero_epsilon)
+static fdd ScaleValueFromRatio_flt128(float t, fdd v_min, fdd v_max, bool is_logarithmic, float logarithmic_zero_epsilon)
 {
     if (t <= 0.0f || v_min == v_max) return v_min;
     if (t >= 1.0f) return v_max;
 
     if (is_logarithmic)
     {
-        f128 eps = f128(logarithmic_zero_epsilon);
-        f128 vminf = (ImAbs128(v_min) < eps) ? (v_min < 0 ? -eps : eps) : v_min;
-        f128 vmaxf = (ImAbs128(v_max) < eps) ? (v_max < 0 ? -eps : eps) : v_max;
+        fdd eps = fdd(logarithmic_zero_epsilon);
+        fdd vminf = (ImAbs128(v_min) < eps) ? (v_min < 0 ? -eps : eps) : v_min;
+        fdd vmaxf = (ImAbs128(v_max) < eps) ? (v_max < 0 ? -eps : eps) : v_max;
 
         bool flipped = v_max < v_min;
-        if (flipped) { f128 t2 = vminf; vminf = vmaxf; vmaxf = t2; }
+        if (flipped) { fdd t2 = vminf; vminf = vmaxf; vmaxf = t2; }
         float tf = flipped ? (1.0f - t) : t;
 
         if ((v_max == 0) && (v_min < 0))
@@ -585,30 +586,30 @@ static f128 ScaleValueFromRatio_flt128(float t, f128 v_min, f128 v_max, bool is_
         {
             float zc = (-(float)ImMin((double)v_min, (double)v_max)) / ImAbs((float)v_max - (float)v_min);
             if (tf < zc)
-                return -(eps * ImPow128(-vminf / eps, f128{ 1.0f - (tf / zc) }));
+                return -(eps * ImPow128(-vminf / eps, fdd{ 1.0f - (tf / zc) }));
             else if (tf > zc)
-                return (eps * ImPow128(vmaxf / eps, f128{ (tf - zc) / (1.0f - zc) }));
+                return (eps * ImPow128(vmaxf / eps, fdd{ (tf - zc) / (1.0f - zc) }));
             else
                 return 0_dd;
         }
         else if ((v_min < 0) || (v_max < 0))
-            return -(-vmaxf * ImPow128(-vminf / -vmaxf, f128{ 1.0f - tf }));
+            return -(-vmaxf * ImPow128(-vminf / -vmaxf, fdd{ 1.0f - tf }));
         else
-            return (vminf * ImPow128(vmaxf / vminf, f128{ tf }));
+            return (vminf * ImPow128(vmaxf / vminf, fdd{ tf }));
     }
 
     // linear
-    return bl::math::lerp(v_min, v_max, f128(t));
+    return bl::math::lerp(v_min, v_max, fdd(t));
 }
 
-static int DataTypeCompareFlt128(const f128* lhs, const f128* rhs)
+static int DataTypeCompareFlt128(const fdd* lhs, const fdd* rhs)
 {
     if (*lhs < *rhs) return -1;
     if (*lhs > *rhs) return +1;
     return 0;
 }
 
-static bool TempInputFlt128(const ImRect& bb, ImGuiID id, const char* label, f128* p_data, const char* format, const f128* p_clamp_min, const f128* p_clamp_max)
+static bool TempInputFlt128(const ImRect& bb, ImGuiID id, const char* label, fdd* p_data, const char* format, const fdd* p_clamp_min, const fdd* p_clamp_max)
 {
     using namespace ImGui;
 
@@ -635,18 +636,20 @@ static bool TempInputFlt128(const ImRect& bb, ImGuiID id, const char* label, f12
     if (TempInputText(bb, id, label, data_buf, IM_ARRAYSIZE(data_buf), flags))
     {
         // Backup old value
-        size_t data_type_size = sizeof(f128);
-        f128 data_backup;
+        size_t data_type_size = sizeof(fdd);
+        fdd data_backup;
         memcpy(&data_backup, p_data, data_type_size);
 
         // Apply new value (or operations) then clamp
         ///DataTypeApplyFromText(data_buf, data_type, p_data, format, NULL);
 
-        f128 v_new;
-        const char* endp = nullptr;
-        bool ok = parse_flt128(data_buf, v_new, &endp);
+        fdd v_new;
+        const auto parsed = bl::from_chars(
+            data_buf,
+            data_buf + std::strlen(data_buf),
+            v_new);
         // accept if parse succeeded and consumed something meaningful
-        if (ok && endp != data_buf)
+        if (parsed.ec == std::errc{} && parsed.ptr != data_buf)
         {
             if (p_clamp_min || p_clamp_max) v_new = ImClamp128(v_new, *p_clamp_min, *p_clamp_max);
             // optional: keep full precision; if you must, round for *display* only
@@ -678,10 +681,10 @@ static bool TempInputFlt128(const ImRect& bb, ImGuiID id, const char* label, f12
 }
 
 //
-// ---- Behavior core for f128 drag ----
+// ---- Behavior core for fdd drag ----
 //
 
-static bool DragBehaviorFloat128(ImGuiID id, f128* v, f128 v_speed, f128 v_min, f128 v_max, const char* format, ImGuiSliderFlags flags)
+static bool DragBehaviorFloat128(ImGuiID id, fdd* v, fdd v_speed, fdd v_min, fdd v_max, const char* format, ImGuiSliderFlags flags)
 {
     using namespace ImGui;
     ImGuiContext& g = *GImGui;
@@ -710,16 +713,16 @@ static bool DragBehaviorFloat128(ImGuiID id, f128* v, f128 v_speed, f128 v_min, 
     // Default speed if not provided and there’s a sane range
     if (v_speed == 0 && is_bounded)
     {
-        // g.DragSpeedDefaultRatio is float; map it into f128 range
-        f128 range = v_max - v_min;
+        // g.DragSpeedDefaultRatio is float; map it into fdd range
+        fdd range = v_max - v_min;
 
-        if (range > 0 && range < std::numeric_limits<f128>::max())
-            v_speed = range * f128(g.DragSpeedDefaultRatio);
+        if (range > 0 && range < std::numeric_limits<fdd>::max())
+            v_speed = range * fdd(g.DragSpeedDefaultRatio);
         else
             v_speed = 1;
     }
 
-    // Mouse / Nav input -> accumulate float delta, then scale to f128
+    // Mouse / Nav input -> accumulate float delta, then scale to fdd
     float adjust_delta_f = 0.0f;
     if (g.ActiveIdSource == ImGuiInputSource_Mouse && ImGui::IsMousePosValid() && ImGui::IsMouseDragPastThreshold(0, g.IO.MouseDragThreshold * DRAG_MOUSE_THRESHOLD_FACTOR))
     {
@@ -756,7 +759,7 @@ static bool DragBehaviorFloat128(ImGuiID id, f128* v, f128 v_speed, f128 v_min, 
         }
         else if (adjust_delta_f != 0.0f)
         {
-            g.DragCurrentAccum += (float)(f128(adjust_delta_f) / std::max(f128::eps(), abs(v_max - v_min)));
+            g.DragCurrentAccum += (float)(fdd(adjust_delta_f) / std::max(fdd::eps(), bl::abs(v_max - v_min)));
             g.DragCurrentAccumDirty = true;
         }
 
@@ -764,7 +767,7 @@ static bool DragBehaviorFloat128(ImGuiID id, f128* v, f128 v_speed, f128 v_min, 
 
         float old_param = ScaleRatioFromValue_flt128(*v, v_min, v_max, true, log_eps);
         float new_param = ImSaturate(old_param + g.DragCurrentAccum);
-        f128 v_new = ScaleValueFromRatio_flt128(new_param, v_min, v_max, true, log_eps);
+        fdd v_new = ScaleValueFromRatio_flt128(new_param, v_min, v_max, true, log_eps);
 
         if (!(flags & ImGuiSliderFlags_NoRoundToFormat))
             v_new = RoundScalarWithFormat128(format, v_new);
@@ -803,7 +806,7 @@ static bool DragBehaviorFloat128(ImGuiID id, f128* v, f128 v_speed, f128 v_min, 
 
         if (!g.DragCurrentAccumDirty) return false;
 
-        f128 v_cur = *v + (f128(g.DragCurrentAccum) * v_speed);
+        fdd v_cur = *v + (fdd(g.DragCurrentAccum) * v_speed);
         if (!(flags & ImGuiSliderFlags_NoRoundToFormat))
             v_cur = RoundScalarWithFormat128(format, v_cur);
 
@@ -812,14 +815,14 @@ static bool DragBehaviorFloat128(ImGuiID id, f128* v, f128 v_speed, f128 v_min, 
         g.DragCurrentAccumDirty = false;
 
         // lose negative zero
-        if (v_cur == f128(-0)) v_cur = 0;
+        if (v_cur == fdd(-0)) v_cur = 0;
 
         // clamp/wrap
         if (is_bounded)
         {
             if (is_wrapped)
             {
-                f128 range = v_max - v_min;
+                fdd range = v_max - v_min;
                 if (range != 0)
                 {
                     // wrap into [v_min, v_max]
@@ -1080,7 +1083,7 @@ namespace ImGui
         return SliderScalar_TowardMax(label, ImGuiDataType_Double, v, &v_min, &v_max, format, flags);
     }
 
-    bool DragFloat128(const char* label, f128* v, f128 v_speed, f128 v_min, f128 v_max, const char* format, ImGuiSliderFlags flags)
+    bool DragFloat128(const char* label, fdd* v, fdd v_speed, fdd v_min, fdd v_max, const char* format, ImGuiSliderFlags flags)
     {
         ImGuiWindow* window = GetCurrentWindow();
         if (window->SkipItems)
@@ -1150,8 +1153,11 @@ namespace ImGui
         if (value_changed)
             MarkItemEdited(id);
 
-        // Display value using your to_string(f128)
-        std::string value_s = to_string(*v, ImParseFormatPrecision128(format, 3), true);
+        // Display value using your to_string(fdd)
+        std::string value_s = to_string(
+            *v,
+            ImParseFormatPrecision128(format, 3),
+            std::ios_base::fixed);
         if (g.LogEnabled) LogSetNextTextDecoration("{", "}");
         RenderTextClipped(frame_bb.Min, frame_bb.Max, value_s.c_str(), NULL, NULL, ImVec2(0.5f, 0.5f));
 
@@ -1237,7 +1243,7 @@ namespace ImGui
         return ret;
     }
 
-    bool RevertableDragFloat128(const char* label, f128* v, f128* initial, f128 v_speed, f128 v_min, f128 v_max, const char* format, ImGuiSliderFlags flags)
+    bool RevertableDragFloat128(const char* label, fdd* v, fdd* initial, fdd v_speed, fdd v_min, fdd v_max, const char* format, ImGuiSliderFlags flags)
     {
         bool ret = false;
 

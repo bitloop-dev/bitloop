@@ -216,6 +216,16 @@ class FFmpegWorker
 
 bool webp_set_save_string_as_xmp_inplace(bytebuf& io_webp, std::string_view save_text);
 bool webp_extract_save_from_xmp(const bytebuf& webp, std::string& out_save);
+bool webp_snapshot_encode_rgba(
+    const uint8_t* rgba,
+    int w,
+    int h,
+    float quality,
+    int method,
+    bool lossless,
+    int near_lossless,
+    int alpha_quality,
+    std::vector<uint8_t>& out);
 
 class WebPWorker
 {

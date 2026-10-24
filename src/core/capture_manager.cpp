@@ -86,7 +86,7 @@ bool webp_anim_add_rgba(
         cfg.lossless = 1;
         WebPConfigLosslessPreset(&cfg, 9);
         cfg.quality = quality; // effort in lossless
-        cfg.near_lossless = near_lossless; // strict lossless
+        cfg.near_lossless = near_lossless;
         cfg.exact = 1; // preserve RGB under alpha
         cfg.alpha_quality = 0;
         cfg.thread_level = 1;
@@ -97,7 +97,7 @@ bool webp_anim_add_rgba(
         cfg.lossless = 0;
         cfg.quality = quality; // 0..100
         cfg.method = method; // 0..6
-        cfg.alpha_quality = 0;
+        cfg.alpha_quality = 100;
         cfg.thread_level = 1;
     }
 

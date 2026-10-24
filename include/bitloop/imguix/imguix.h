@@ -9,7 +9,7 @@ constexpr double pi = std::numbers::pi;
 
 #include <bitloop/core/project.h>
 #include <bitloop/core/image_loader.h>
-#include <bitloop/util/fltx/f128.h>
+#include <fltx.h>
 
 #include <imgui_internal.h>
 #include <imgui_freetype.h>
@@ -74,8 +74,8 @@ std::ostream& operator<<(std::ostream& os, const ImGradient& gradient);
 
 namespace ImGui
 {
-    using bl::f128;
-    using bl::operator""_dd;
+    using bl::fdd;
+    using namespace bl::literals;
 
     struct StartValue { void* initial; int size; };
     static std::unordered_map<void*, StartValue> starting_map;
@@ -103,7 +103,91 @@ namespace ImGui
     bool SliderDouble2(const char* label, double v[2], double v_min, double v_max, const char* format = "%.6f", ImGuiSliderFlags flags = 0);
     bool DragDouble2(const char* label, double v[2], double v_speed = 1.0f, double v_min = 0.0f, double v_max = 0.0f, const char* format = "%.6f", ImGuiSliderFlags flags = 0);
     bool SliderDouble_InvLog(const char* label, double* v, double v_min, double v_max, const char* format, ImGuiSliderFlags flags = 0);
-    bool DragFloat128(const char* label, f128* v, f128 v_speed=0_dd, f128 v_min=0_dd, f128 v_max=0_dd, const char* format = "%.32f", ImGuiSliderFlags flags = 0);
+    bool DragFloat128(const char* label, fdd* v, fdd v_speed=0_dd, fdd v_min=0_dd, fdd v_max=0_dd, const char* format = "%.32f", ImGuiSliderFlags flags = 0);
+
+    template<typename T>
+    bool DragFltx(const char* id, T* v, T v_speed, T v_min = {0.0}, T v_max = {1.0}, int precision=12)
+    {
+        double delta = 0.0;
+        if (ImGui::DragDouble(id, &delta,
+            1.0, 0.0, 0.0,
+            bl::to_string(*v, precision, std::ios_base::scientific).c_str(), ImGuiSliderFlags_NoRoundToFormat | ImGuiSliderFlags_NoInput))
+        {
+            *v += delta * v_speed;
+            if (v_max > v_min)
+            {
+                if (*v < v_min) *v = v_min;
+                if (*v > v_max) *v = v_max;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    template<typename T, typename T_Initial>
+    bool RevertableDragFltx(const char* id, T* v, T_Initial* initial, T v_speed, T v_min = {0.0}, T v_max = {1.0}, int precision = 12)
+    {
+        bool ret = false;
+
+        ImGui::BeginGroup();
+        ImGui::PushItemWidth(ImGui::CalcItemWidth() - bl::platform()->lineHeight());
+        ret |= DragFltx<T>(id, v, v_speed, v_min, v_max, precision);
+        ImGui::PopItemWidth();
+
+        ImGui::PushID("reset_");
+        if (*v != static_cast<T>(*initial) && InlResetBtn(id))
+        {
+            *v = static_cast<T>(*initial);
+            ret |= true;
+        }
+        ImGui::PopID();
+        ImGui::EndGroup();
+
+        return ret;
+    }
+
+    template<typename T>
+    bool DragFltxCompact(const char* id, T* v, T v_speed, T v_min, T v_max, int max_precision, int peek_front=4, int peek_back=10)
+    {
+        double delta = 0.0;
+        if (ImGui::DragDouble(id, &delta,
+            1.0, 0.0, 0.0,
+            bl::to_string(*v, bl::precision_info(max_precision, peek_front, peek_back)).c_str(),
+            //bl::to_string_collapsed(*v, max_precision, peek_front, peek_back).c_str(),
+            ImGuiSliderFlags_NoRoundToFormat | ImGuiSliderFlags_NoInput))
+        {
+            *v += (T)delta * v_speed;
+            if (v_max > v_min)
+            {
+                if (*v < v_min) *v = v_min;
+                if (*v > v_max) *v = v_max;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    template<typename T, typename T_Initial>
+    bool RevertableDragFltxCompact(const char* id, T* v, T_Initial* initial, T v_speed, T v_min, T v_max, int max_precision, int peek_front = 4, int peek_back = 10)
+    {
+        bool ret = false;
+
+        ImGui::BeginGroup();
+        ImGui::PushItemWidth(ImGui::CalcItemWidth() - bl::platform()->lineHeight());
+        ret |= DragFltxCompact<T>(id, v, v_speed, v_min, v_max, max_precision, peek_front, peek_back);
+        ImGui::PopItemWidth();
+
+        ImGui::PushID("reset_");
+        if (*v != static_cast<T>(*initial) && InlResetBtn(id))
+        {
+            *v = static_cast<T>(*initial);
+            ret |= true;
+        }
+        ImGui::PopID();
+        ImGui::EndGroup();
+
+        return ret;
+    }
 
     bool SliderAngle(const char* label, double* v_rad, double v_rad_min, double v_rad_max, const char* format = "%.1f\xC2\xB0", ImGuiSliderFlags flags = 0);
     bool SliderAngle(const char* label, double* v_rad, double v_rad_min = 0.0, double v_rad_max = std::numbers::pi*2.0, int decimals = 1, ImGuiSliderFlags flags = 0);
@@ -111,7 +195,7 @@ namespace ImGui
 
     bool RevertableSliderDouble(const char* label, double* v, double* initial, double v_min, double v_max, const char* format = "%.6f", ImGuiSliderFlags flags = 0);
     bool RevertableDragDouble(const char* label, double* v, double* initial, double v_speed, double v_min, double v_max, const char* format = "%.6f", ImGuiSliderFlags flags = 0);
-    bool RevertableDragFloat128(const char* label, f128* v, f128* initial, f128 v_speed, f128 v_min, f128 v_max, const char* format = "%.6f", ImGuiSliderFlags flags = 0);
+    bool RevertableDragFloat128(const char* label, fdd* v, fdd* initial, fdd v_speed, fdd v_min, fdd v_max, const char* format = "%.6f", ImGuiSliderFlags flags = 0);
     bool RevertableSliderDouble2(const char* label, double v[2], double initial[2], double v_min, double v_max, const char* format = "%.6f", ImGuiSliderFlags flags = 0);
 
     bool RevertableSliderAngle(const char* label, double* v_rad, double* initial, double v_rad_min, double v_rad_max, const char* format = "%.1f\xC2\xB0", ImGuiSliderFlags flags = 0);

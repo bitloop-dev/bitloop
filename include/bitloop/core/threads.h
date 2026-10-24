@@ -9,9 +9,7 @@
 #include <future>
 #include <atomic>
 #include <memory>
-
 #include <vector>
-
 #include <type_traits>
 #include <span>
 
@@ -113,6 +111,53 @@ namespace Thread
         return ranges;
     }
 
+    template<typename sizeT, typename VecT, typename RectT>
+    requires requires(const VecT& v, const RectT& r)
+    {
+        { v.x }        -> std::convertible_to<sizeT>;
+        { v.y }        -> std::convertible_to<sizeT>;
+        { r.x() }      -> std::convertible_to<sizeT>;
+        { r.y() }      -> std::convertible_to<sizeT>;
+        { r.width() }  -> std::convertible_to<sizeT>;
+        { r.height() } -> std::convertible_to<sizeT>;
+    }
+    [[nodiscard]] inline std::vector<std::pair<sizeT, sizeT>> splitRanges(VecT container, RectT rect, sizeT numParts)
+    {
+        std::vector<std::pair<sizeT, sizeT>> ranges;
+
+        if (numParts == 0 || rect.width() <= 0 || rect.height() <= 0)
+            return ranges;
+
+        ranges.reserve(numParts);
+
+        const sizeT stride = static_cast<sizeT>(container.x);
+        const sizeT rowsPerPart = static_cast<sizeT>(rect.height()) / numParts;
+        const sizeT remainder = static_cast<sizeT>(rect.height()) % numParts;
+
+        sizeT y = static_cast<sizeT>(rect.y());
+        const sizeT x = static_cast<sizeT>(rect.x());
+        const sizeT width = static_cast<sizeT>(rect.width());
+
+        for (sizeT i = 0; i < numParts; ++i)
+        {
+            const sizeT rows = rowsPerPart + (i < remainder ? 1 : 0);
+
+            if (rows == 0)
+            {
+                ranges.emplace_back(0, 0);
+                continue;
+            }
+
+            const sizeT start = y * stride + x;
+            const sizeT end = (y + rows - 1) * stride + x + width;
+
+            ranges.emplace_back(start, end);
+            y += rows;
+        }
+
+        return ranges;
+    }
+
     template<typename sizeT>
     [[nodiscard]] inline std::pair<sizeT, sizeT> splitRange(sizeT totalSize, sizeT numParts, sizeT blockIndex)
     {
@@ -158,8 +203,102 @@ namespace Thread
     //    }
     //}
 
-    template<typename T, typename Callback>
-        requires (std::invocable<Callback&, int, int> && !std::invocable<Callback&, std::span<T>>)
+    template<typename SizeT, typename Callback>
+        requires (std::invocable<Callback&, SizeT /*i0*/, SizeT /*i1*/>)
+    auto forEachBatch(SizeT N,
+        Callback&& callback,
+        int thread_count = Thread::threadCount())
+    {
+        using CB = std::decay_t<Callback>;
+        static_assert(std::is_invocable_v<CB&, int, int>);
+        using R = std::invoke_result_t<CB&, int, int>;
+        using E = std::remove_cvref_t<R>;
+
+        auto ranges = Thread::splitRanges<SizeT>(N, thread_count);
+
+        CB cb = std::forward<Callback>(callback);
+
+        if constexpr (std::is_void_v<R>) {
+            std::vector<std::future<void>> futs;
+            futs.reserve(ranges.size());
+            for (size_t ti = 0; ti < ranges.size(); ++ti) {
+                auto [i0, i1] = ranges[ti];
+                futs.emplace_back(Thread::pool().submit_task([&cb, i0, i1] {
+                    cb(i0, i1);
+                }));
+            }
+            for (auto& f : futs) if (f.valid()) f.get();
+            return; // void
+        }
+        else {
+            std::vector<E> out(ranges.size());
+            std::vector<std::future<void>> futs;
+            futs.reserve(ranges.size());
+            for (size_t ti = 0; ti < ranges.size(); ++ti) {
+                auto [i0, i1] = ranges[ti];
+                futs.emplace_back(Thread::pool().submit_task([&cb, i0, i1, &out, ti] {
+                    out[ti] = cb(i0, i1);
+                }));
+            }
+            for (auto& f : futs) if (f.valid()) f.get();
+            return out; // std::vector<E>
+        }
+    }
+
+    template<typename VecT, typename RectT, typename Callback>
+        requires std::invocable<Callback&, int, int> &&
+        requires(const VecT& v, const RectT& r)
+    {
+        { v.x }        -> std::convertible_to<int>;
+        { v.y }        -> std::convertible_to<int>;
+        { r.x() }      -> std::convertible_to<int>;
+        { r.y() }      -> std::convertible_to<int>;
+        { r.width() }  -> std::convertible_to<int>;
+        { r.height() } -> std::convertible_to<int>;
+    }
+    auto forEachBatch(
+        VecT container,
+        RectT rect_inner,
+        Callback&& callback,
+        int thread_count = Thread::threadCount())
+    {
+        using CB = std::decay_t<Callback>;
+        static_assert(std::is_invocable_v<CB&, int, int>);
+        using R = std::invoke_result_t<CB&, int, int>;
+        using E = std::remove_cvref_t<R>;
+
+        auto ranges = Thread::splitRanges<int>(container, rect_inner, thread_count);
+
+        CB cb = std::forward<Callback>(callback);
+
+        if constexpr (std::is_void_v<R>) {
+            std::vector<std::future<void>> futs;
+            futs.reserve(ranges.size());
+            for (size_t ti = 0; ti < ranges.size(); ++ti) {
+                auto [i0, i1] = ranges[ti];
+                futs.emplace_back(Thread::pool().submit_task([&cb, i0, i1] {
+                    cb(i0, i1);
+                }));
+            }
+            for (auto& f : futs) if (f.valid()) f.get();
+            return; // void
+        }
+        else {
+            std::vector<E> out(ranges.size());
+            std::vector<std::future<void>> futs;
+            futs.reserve(ranges.size());
+            for (size_t ti = 0; ti < ranges.size(); ++ti) {
+                auto [i0, i1] = ranges[ti];
+                futs.emplace_back(Thread::pool().submit_task([&cb, i0, i1, &out, ti] {
+                    out[ti] = cb(i0, i1);
+                }));
+            }
+            for (auto& f : futs) if (f.valid()) f.get();
+            return out; // std::vector<E>
+        }
+    }
+
+    template<typename T, typename Callback> requires (std::invocable<Callback&, int, int> && !std::invocable<Callback&, std::span<T>>)
     auto forEachBatch(std::vector<T>& items,
         Callback&& callback,
         int thread_count = Thread::threadCount())
@@ -202,8 +341,9 @@ namespace Thread
     }
 
     // ---------- span<T> (mutable) overload ----------
-    template<typename T, typename Callback>
-        requires std::invocable<Callback&, std::span<T>>
+    // usage: Thread::forEachBatch(vec, [&](std::span<T> span) {  });
+    // usage: Thread::forEachBatch(vec, [&](int i0, int i1) {  });
+    template<typename T, typename Callback> requires std::invocable<Callback&, std::span<T>>
     auto forEachBatch(std::vector<T>& items,
         Callback&& callback,
         int thread_count = Thread::threadCount())
@@ -245,8 +385,7 @@ namespace Thread
     }
 
     // ---------- span<T> + thread_index (mutable) overload ----------
-    template<typename T, typename Callback>
-        requires std::invocable<Callback&, std::span<T>, int>
+    template<typename T, typename Callback> requires std::invocable<Callback&, std::span<T>, int>
     auto forEachBatch(std::vector<T>& items,
         Callback&& callback,
         int thread_count = Thread::threadCount())
@@ -288,8 +427,7 @@ namespace Thread
     }
 
     // ---------- span<const T> (read-only) overload ----------
-    template<typename T, typename Callback>
-        requires std::invocable<Callback&, std::span<const T>>
+    template<typename T, typename Callback> requires std::invocable<Callback&, std::span<const T>>
     auto forEachBatch(const std::vector<T>& items,
         Callback&& callback,
         int thread_count = Thread::threadCount())

@@ -18,7 +18,7 @@ void ExampleText_Project::projectPrepare(Layout& layout)
         layout << create<ExampleText_Scene>();
 
     /// Or create a single Scene instance and view on multiple Viewports
-    //auto* scene = create<ExampleText_Scene>();
+    // SceneHandle<ExampleText_Scene> scene = create<ExampleText_Scene>();
     //for (int i = 0; i < viewport_count; ++i)
     //    layout << scene;
 }
@@ -70,12 +70,11 @@ void ExampleText_Scene::sceneStart()
 
 }
 
-void ExampleText_Scene::sceneMounted(Viewport* ctx)
+void ExampleText_Scene::sceneMounted([[maybe_unused]] Viewport* ctx)
 {
     // Initialize viewport
-    camera.setSurface(ctx);
     camera.setOriginViewportAnchor(Anchor::CENTER);
-    //camera.focusWorldRect(-100, -100, 1000, 700);
+    //camera.focusWorldRect(*ctx, -100, -100, 1000, 700);
 
     navigator.setTarget(camera);
     navigator.setDirectCameraPanning(true);
@@ -87,7 +86,7 @@ void ExampleText_Scene::sceneDestroy()
     // Destroy scene (dynamically allocated resources, etc.)
 }
 
-void ExampleText_Scene::sceneProcess()
+void ExampleText_Scene::sceneProcess([[maybe_unused]] double dt)
 {
     // Process scene update
 }
@@ -104,7 +103,7 @@ void ExampleText_Scene::viewportProcess(
 void ExampleText_Scene::viewportDraw(Viewport* ctx) const
 {
     // Draw Scene on this viewport (don't update simulation state here)
-    ctx->setTransform(camera.getTransform());
+    ctx->transform(camera);
     ctx->drawWorldAxis();
 
     ctx->worldCoordinates(opts.transform_coordinates);

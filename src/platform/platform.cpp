@@ -262,7 +262,7 @@ bool PlatformManager::deviceVertical()
     #ifdef __EMSCRIPTEN__
     EmscriptenOrientationChangeEvent orientation;
     if (emscripten_get_orientation_status(&orientation) == EMSCRIPTEN_RESULT_SUCCESS)
-        return abs(orientation.orientationAngle % 180) < 90;
+        return std::abs(orientation.orientationAngle % 180) < 90;
     #endif
 
     // todo: Add do DebugDevicePreset
@@ -408,6 +408,45 @@ std::filesystem::path PlatformManager::executableDir() const
 
     #else // fallback
     return std::filesystem::current_path();
+    #endif
+}
+
+bool PlatformManager::openDirectory(const std::filesystem::path& directory) const
+{
+    #ifdef BL_WEB_BUILD
+    (void)directory;
+    return SDL_SetError("Opening folders requires a native application");
+    #else
+    if (directory.empty()) return SDL_SetError("No folder was specified");
+
+    std::error_code error;
+    const auto absolutePath = std::filesystem::absolute(directory, error).lexically_normal();
+    if (error) return SDL_SetError("Cannot resolve folder: %s", error.message().c_str());
+    const bool isDirectory = std::filesystem::is_directory(absolutePath, error);
+    if (error) return SDL_SetError("Cannot access folder: %s", error.message().c_str());
+    if (!isDirectory) return SDL_SetError("The path does not exist or is not a directory");
+
+    #ifdef _WIN32
+    // SDL passes this directly to ShellExecuteW; a native path preserves Unicode and literal URL characters.
+    const auto utf8Path = absolutePath.u8string();
+    return SDL_OpenURL(reinterpret_cast<const char*>(utf8Path.c_str()));
+    #else
+    const auto utf8Path = absolutePath.generic_u8string();
+    std::string url = "file://";
+    constexpr char hex[] = "0123456789ABCDEF";
+    for (unsigned char c : utf8Path)
+    {
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+            || c == '/' || c == ':' || c == '-' || c == '_' || c == '.' || c == '~') url += char(c);
+        else
+        {
+            url += '%';
+            url += hex[c >> 4];
+            url += hex[c & 15];
+        }
+    }
+    return SDL_OpenURL(url.c_str());
+    #endif
     #endif
 }
 

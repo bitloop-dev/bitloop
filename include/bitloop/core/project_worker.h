@@ -1,15 +1,15 @@
 #pragma once
 #include <bitloop/core/threads.h>
 #include <bitloop/core/types.h>
+#include <bitloop/core/capture_context.h>
 #include <bitloop/core/snapshot_presets.h>
 
-#include <SDL3/SDL.h>
+#include <bitloop/core/event_data.h>
 
 BL_BEGIN_NS
 
 class ProjectBase;
 class NanoCanvas;
-class CaptureManager;
 struct ImDebugLog;
 
 enum struct ProjectCommandType
@@ -43,7 +43,7 @@ class ProjectWorker
 {
     static ProjectWorker* singleton;
 
-    CaptureManager* capture_manager = nullptr; // Owned by MainWindow
+    CaptureContext* capture_context = nullptr; // Owned by GUI or headless host
 
     std::vector<ProjectCommandEvent> project_command_queue;
     std::mutex event_queue_mutex;
@@ -53,7 +53,7 @@ class ProjectWorker
 
     void _destroyActiveProject();
 
-    void _onEvent(SDL_Event& e);
+    void _onEvent(const EventData& e);
 
 protected:
 
@@ -72,15 +72,15 @@ protected:
 
 public:
 
-    std::vector<SDL_Event> input_event_queue;
+    std::vector<EventData> input_event_queue;
 
     [[nodiscard]] static constexpr ProjectWorker* instance() {
         return singleton;
     }
 
-    ProjectWorker(SharedSync& _shared_sync, CaptureManager* _capture_manager) :
-        shared_sync(_shared_sync),
-        capture_manager(_capture_manager)
+    ProjectWorker(SharedSync& _shared_sync, CaptureContext& _capture_context) :
+        capture_context(&_capture_context),
+        shared_sync(_shared_sync)
     {
         singleton = this;
     }
@@ -97,7 +97,7 @@ public:
     void pushDataToUnchangedShadowVars();  // Feed Live data to shadow buffer (IF shadow var is unchanged)
     void pullDataFromShadow();             // Process queued events
 
-    void queueEvent(const SDL_Event& event); // Feed SDL event to event queue
+    void queueEvent(EventData event);        // Feed owned input to event queue
     void pollEvents();                       // Process queued data (if modified by ImGui inputs)
 
     // ======== Project Control ========

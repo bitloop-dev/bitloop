@@ -80,6 +80,12 @@ public:
         window = _window;
     }
 
+    ~PlatformManager()
+    {
+        if (singleton == this)
+            singleton = nullptr;
+    }
+
     // Required function calls
     void init();
     void update();
@@ -158,6 +164,9 @@ public:
     [[nodiscard]] std::filesystem::path executableDir() const;
     [[nodiscard]] std::filesystem::path resourceDir() const;
     [[nodiscard]] std::string path(std::string_view virtual_path) const;
+
+    // Opens an existing directory in the native file manager; failures set SDL_GetError().
+    [[nodiscard]] bool openDirectory(const std::filesystem::path& directory) const;
 
 
     // URL helpers

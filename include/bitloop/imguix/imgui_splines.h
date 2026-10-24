@@ -2,6 +2,7 @@
 
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <bitloop/util/hashable.h>
 
 #include <functional>
 #include <string>
@@ -423,7 +424,7 @@ namespace ImSpline
 
 		// Each time spline changes a hash value is generated. Useful for checking if 
 		// spline has changed by comparing against previous value
-		size_t spline_hash = 0;
+		bl::hash_t spline_hash = 0;
 
 		// Map x value to column index. First column at path left bound
 		inline int intersectionColumn(float x) const
@@ -573,17 +574,12 @@ namespace ImSpline
 			return u;
 		}
 
-		inline void hash_combine(std::size_t& seed, std::size_t value) {
-			seed ^= value + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-		}
-
-		std::size_t hashFloatArray(const float* data, std::size_t count) {
-			std::size_t seed = 0;
+		bl::hash_t hashFloatArray(const float* data, std::size_t count) {
+			bl::StableHasher hasher;
 			for (std::size_t i = 0; i < count; ++i) {
-				uint32_t bits = floatBits(data[i]);
-				hash_combine(seed, std::hash<uint32_t>()(bits));
+				hasher.add(floatBits(data[i]));
 			}
-			return seed;
+			return hasher.finish();
 		}
 
 		void updateHash()
@@ -1256,7 +1252,7 @@ namespace ImSpline
 			return optimization_type == OptimizationType::LINEAR;
 		}
 
-		const size_t& hash() const
+		bl::hash_t hash() const
 		{
 			return spline_hash;
 		}
@@ -1300,7 +1296,7 @@ namespace ImSpline
 
 		void deserialize(const std::string& base64Str)
 		{
-			size_t old_hash = hash();
+			bl::hash_t old_hash = hash();
 
 			// Decode
 			std::vector<unsigned char> buffer = base64_decode(base64Str);
@@ -1465,7 +1461,7 @@ namespace ImSpline
 		// Deserialize Base64 string to Spline
 		void deserialize(const std::string& txt)
 		{
-			size_t old_hash = hash();
+			bl::hash_t old_hash = hash();
 
 			int point_count = point_arr.Size;
 

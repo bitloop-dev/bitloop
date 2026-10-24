@@ -1,0 +1,14 @@
+{
+  "files": {
+    "findBitloop.cmake": "05a2733eccc64aebee1f88d3328baa621269d144d0b29c8c29b98f308cf6db71",
+    "toolchain/bitloop_provider.cmake": "2db5c7273dda37b7b39212679532757c9cbfc561b81323c2e20803bcd37516d1",
+    "toolchain/discovery_shims.cmake": "81f940ac0af9a08fc0d9e323257236f413617f23ff21302e73680c57e3542ae8",
+    "toolchain/discovery_toolchain.cmake": "66cbae326d7045b124a962bdd4bdbc9f7ede1df5299dad814dbb90b9f8c3069e",
+    "toolchain/merge_vcpkg_manifests.cmake": "7d5ebff314382174b578f00b1e6fd271bb673bd771d1c49f6e8045d073e77b57",
+    "toolchain/vcpkg_autodetect.cmake": "41b189684d6caa0532bae36a8ef609459f26ea9ce0e520a33c10b12ebddc99b6",
+    "triplets/wasm32-emscripten-multithreaded.cmake": "ca6cd0dcd2bbe83afb01813004e6ac4e901d89a6d59ca34af2d90af4437c421c"
+  },
+  "pack_name": "bitloop-project-tooling",
+  "pack_revision": "2",
+  "schema_version": 1
+}

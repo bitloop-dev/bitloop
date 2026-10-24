@@ -3,19 +3,31 @@
 #include <bitloop/core/viewport.h>
 #include <bitloop/imguix/imguix.h>
 #include <bitloop/platform/platform.h>
+//#include <bitloop/util/constexpr_dispatch_mappings.h>
 
 BL_BEGIN_NS
 
-DVec2 CameraInfo::originWorldOffset() const
+DVec2 CameraInfo::originWorldOffset(const SurfaceInfo& surface) const
 {
-    return originPixelOffset() / (f64)(zoom_128 * surface->initialSizeScale());
+    return originPixelOffset(surface) / (zoom_64 * surface.initialSizeScale());
 }
 
 bool CameraInfo::operator ==(const CameraInfo& rhs) const
 {
-    if (pos_128 != rhs.pos_128) return false;
+    if (max_precision != rhs.max_precision) return false;
+
+    if (max_precision == FloatType::FQD) {
+        if (pos_256 != rhs.pos_256) return false;
+    }
+    else if (max_precision == FloatType::FDD) {
+        if (pos_128 != rhs.pos_128) return false;
+    }
+    else {
+        if (pos_64 != rhs.pos_64) return false;
+    }
+
     if (stretch_64 != rhs.stretch_64) return false;
-    if (zoom_128 != rhs.zoom_128) return false;
+    if (zoom_64 != rhs.zoom_64) return false;
     if (rotation_64 != rhs.rotation_64) return false;
     if (cam_pan != rhs.cam_pan) return false;
     if (ref_zoom != rhs.ref_zoom) return false;
@@ -31,8 +43,9 @@ CameraInfo& CameraInfo::operator =(const CameraInfo& rhs)
 {
     if (*this != rhs)
     {
-        pos_128 = rhs.pos_128;
-        zoom_128 = rhs.zoom_128;
+        max_precision = rhs.max_precision;
+
+        zoom_64 = rhs.zoom_64;
         stretch_64 = rhs.stretch_64;
         rotation_64 = rhs.rotation_64;
         cam_pan = rhs.cam_pan;
@@ -43,47 +56,87 @@ CameraInfo& CameraInfo::operator =(const CameraInfo& rhs)
         init_stretch = rhs.init_stretch;
         init_rotation = rhs.init_rotation;
 
-        posDirty();
-        zoomDirty();
+        if (max_precision == FloatType::FQD)
+        {
+            pos_256 = rhs.pos_256;
+            posChanged<fqd>();
+        }
+        else if (max_precision == FloatType::FDD)
+        {
+            pos_128 = rhs.pos_128;
+            posChanged<fdd>();
+        }
+        else
+        {
+            pos_64 = rhs.pos_64;
+            posChanged<f64>();
+        }
+
+        zoomChanged();
     }
     return *this;
 }
 
-const WorldStageTransform& CameraInfo::getTransform() const
+WorldStageTransform CameraInfo::transformFor(const SurfaceInfo& surface) const
 {
-    // todo: Make thread safe? (If called from multiple threads)
-    assert(surface != nullptr);
+    WorldStageTransform transform;
+    transform.setMaxPrecision(max_precision);
+    transform.reset();
 
-    if (surface->resized())
-        is_dirty = true; // Force update if surface size changes
+    const DVec2 adjusted_zoom = zoom_xy * surface.initialSizeScale();
+    const DVec2 origin_offset = originPixelOffset(surface);
 
-    if (!is_dirty) return *t;
-    if (!t) t = new WorldStageTransform();
+    if (transform.maxPrecision() >= FloatType::FQD)
+    {
+        transform.translate(
+            fqd{ origin_offset.x } + fqd{ pan_x },
+            fqd{ origin_offset.y } + fqd{ pan_y }
+        );
+        transform.rotate(rotation_64);
+        transform.translate(
+            -x_256 * fqd{ adjusted_zoom.x },
+            -y_256 * fqd{ adjusted_zoom.y }
+        );
+        transform.scale(
+            fqd{ adjusted_zoom.x },
+            fqd{ adjusted_zoom.y }
+        );
+    }
+    else if (transform.maxPrecision() >= FloatType::FDD)
+    {
+        transform.translate(
+            fdd{ origin_offset.x } + fdd{ pan_x },
+            fdd{ origin_offset.y } + fdd{ pan_y }
+        );
+        transform.rotate(rotation_64);
+        transform.translate(
+            -x_128 * fdd{ adjusted_zoom.x },
+            -y_128 * fdd{ adjusted_zoom.y }
+        );
+        transform.scale(
+            fdd{ adjusted_zoom.x },
+            fdd{ adjusted_zoom.y }
+        );
+    }
+    else
+    {
+        transform.translate(origin_offset.x + pan_x, origin_offset.y + pan_y);
+        transform.rotate(rotation_64);
+        transform.translate(-x_64 * adjusted_zoom.x, -y_64 * adjusted_zoom.y);
+        transform.scale(adjusted_zoom.x, adjusted_zoom.y);
+    }
 
-    DDVec2 origin_offset = originPixelOffset();
-    DDVec2 adjusted_zoom = zoom_xy * surface->initialSizeScale();
-
-    t->m128 = DDMat3(1.0_dd);
-    t->m128 *= dd_translate(origin_offset.x + pan_x, origin_offset.y + pan_y);
-    t->m128 *= dd_rotate(f128{ rotation_64 });
-    t->m128 *= dd_translate(-x_128 * adjusted_zoom.x, -y_128 * adjusted_zoom.y);
-    t->m128 *= dd_scale(adjusted_zoom.x, adjusted_zoom.y);
-
-    t->updateCache();
-    is_dirty = false;
-
-    return *t;
+    return transform;
 }
 
 void CameraInfo::setOriginViewportAnchor(double ax, double ay)
 {
     viewport_anchor = { ax, ay };
-    dirty();
 }
 
-DVec2 bl::CameraInfo::viewportStageSize() const
+DVec2 bl::CameraInfo::viewportStageSize(const SurfaceInfo& surface) const
 {
-    return surface->size();
+    return surface.size();
 }
 
 void CameraInfo::setOriginViewportAnchor(Anchor anchor)
@@ -102,64 +155,65 @@ void CameraInfo::setOriginViewportAnchor(Anchor anchor)
     }
 }
 
-DVec2 CameraInfo::originPixelOffset() const
+DVec2 CameraInfo::originPixelOffset(const SurfaceInfo& surface) const
 {
-    double viewport_cx = (surface->width() / 2.0);
-    double viewport_cy = (surface->height() / 2.0);
+    const double viewport_cx = surface.width() / 2.0;
+    const double viewport_cy = surface.height() / 2.0;
 
     return Vec2(
-        viewport_cx + surface->width() * (viewport_anchor.x - 0.5),
-        viewport_cy + surface->height() * (viewport_anchor.y - 0.5)
+        viewport_cx + surface.width() * (viewport_anchor.x - 0.5),
+        viewport_cy + surface.height() * (viewport_anchor.y - 0.5)
     );
 }
 
 // Scale world to fit viewport rect
 void CameraInfo::cameraToViewport(
-    double left,
-    double top,
-    double right,
-    double bottom)
+    const SurfaceInfo& surface,
+    f64 left,
+    f64 top,
+    f64 right,
+    f64 bottom)
 {
     double world_w = (right - left);
     double world_h = (bottom - top);
 
     rotation_64 = 0;
-    zoom_x = surface->width() / world_w;
-    zoom_y = surface->height() / world_h;
-    x_128  = (surface->width() / 2) / zoom_x;
-    y_128  = (surface->height() / 2) / zoom_y;
+    zoom_x = surface.width() / world_w;
+    zoom_y = surface.height() / world_h;
+    x_256  = (surface.width() / 2.0) / zoom_x;
+    y_256  = (surface.height() / 2.0) / zoom_y;
 
-    posDirty();
-    zoomDirty();
+    posChanged<fqd>();
+    zoomChanged();
 }
 
 void CameraInfo::focusWorldRect(
-    f128 left, f128 top,
-    f128 right, f128 bottom,
+    const SurfaceInfo& surface,
+    fqd x0, fqd y0, fqd x1, fqd y1,
     bool stretch)
 {
-    f128 world_w = right - left;
-    f128 world_h = bottom - top;
+    fqd world_w = x1 - x0;
+    fqd world_h = y1 - y0;
     rotation_64 = 0;
     pan_x = 0;
     pan_y = 0;
 
     if (stretch)
     {
-        f128 zx = surface->width() / world_w;
-        f128 zy = surface->height() / world_h;
-        zoom_128 = DDVec2{ zx, zy }.mag();
-        sx_64 = (double)(zx / zoom_128);
-        sy_64 = (double)(zy / zoom_128);
+        f64 zx = (f64)((fqd)surface.width() / world_w);
+        f64 zy = (f64)((fqd)surface.height() / world_h);
+        zoom_64 = DVec2{ zx, zy }.mag();
+        sx_64 = (zx / zoom_64);
+        sy_64 = (zy / zoom_64);
 
-        DVec2 _originWorldOffset = originWorldOffset();
-        x_128 = left + _originWorldOffset.x;
-        y_128 = top  + _originWorldOffset.y;
+        const DVec2 origin_world_offset = originWorldOffset(surface);
+        x_256 = x0 + origin_world_offset.x;
+        y_256 = y0 + origin_world_offset.y;
     }
     else
     {
-        f128 aspect_view = f128(surface->width() / surface->height());
-        f128 aspect_rect = world_w / world_h;
+        fqd aspect_view = fqd(surface.width() / surface.height());
+        fqd aspect_rect = world_w / world_h;
 
         // Not re-stretching, but preserve existing stretch aspect ratio?
         stretch_64 = { 1, 1 };
@@ -167,39 +221,39 @@ void CameraInfo::focusWorldRect(
         if (aspect_rect > aspect_view)
         {
             // Shrink Height, gap top and bottom
-            zoom_128 = (surface->width() / world_w);
+            zoom_64 = (f64)((fqd)surface.width() / world_w);
 
-            assert(zoom_128 > 0.0);
+            assert(zoom_64 > 0.0);
 
-            DVec2 _originWorldOffset = originWorldOffset();
+            const DVec2 origin_world_offset = originWorldOffset(surface);
 
-            f128 world_ox{ 0 };
-            f128 world_oy = ((surface->height() - (world_h * zoom_128)) / 2) / zoom_128;
+            fqd world_ox{ 0.0 };
+            fqd world_oy = (((fqd)surface.height() - (world_h * (fqd)zoom_64)) / 2.0) / (fqd)zoom_64;
 
-            x_128 = _originWorldOffset.x + left - world_ox;
-            y_128 = _originWorldOffset.y + top - world_oy;
+            x_256 = origin_world_offset.x + x0 - world_ox;
+            y_256 = origin_world_offset.y + y0 - world_oy;
         }
         else
         {
             // Shrink Width, gap left and right
-            zoom_128 = (surface->height() / world_h);
+            zoom_64 = (f64)((fqd)surface.height() / world_h);
 
-            assert(zoom_128 > 0.0);
+            assert(zoom_64 > 0.0);
 
-            DVec2 _originWorldOffset = originWorldOffset();
+            const DVec2 origin_world_offset = originWorldOffset(surface);
 
-            f128 world_ox = ((surface->width() - (world_w * zoom_128)) / 2) / zoom_128;
-            f128 world_oy{ 0 };
+            fqd world_ox = (((fqd)surface.width() - (world_w * (fqd)zoom_64)) / 2.0) / (fqd)zoom_64;
+            fqd world_oy{ 0.0 };
 
-            x_128 = _originWorldOffset.x + left - world_ox;
-            y_128 = _originWorldOffset.y + top - world_oy;
+            x_256 = origin_world_offset.x + x0 - world_ox;
+            y_256 = origin_world_offset.y + y0 - world_oy;
         }
     }
 
-    ref_zoom = zoom_128;
+    ref_zoom = zoom_64;
 
-    posDirty();
-    zoomDirty();
+    posChanged<fqd>();
+    zoomChanged();
 }
 
 void CameraInfo::originToCenterViewport()
@@ -207,7 +261,7 @@ void CameraInfo::originToCenterViewport()
     setPos(0, 0);
 }
 
-void CameraInfo::populateUI(DRect restrict_world_rect)
+void CameraInfo::populateUI(DRect world_bounds)
 {
     bool changed = false;
 
@@ -220,23 +274,52 @@ void CameraInfo::populateUI(DRect restrict_world_rect)
 
 
     ImGui::SetNextItemWidthForSpace(required_space);
-    if (ImGui::RevertableDragFloat128("X", &x_128, &init_pos.x, 1.0 / zoom_128, f128{ restrict_world_rect.x1 }, f128{ restrict_world_rect.x2 }, format))
-        changed = true;
+    //if (ImGui::RevertableDragFloat128("X", &x_128, &init_pos.x, 1.0 / zoom_128, fdd{ restrict_world_rect.x1 }, fdd{ restrict_world_rect.x2 }, format))
+    //    changed = true;
+    //ImGui::SetNextItemWidthForSpace(required_space);
+    //if (ImGui::RevertableDragFloat128("Y", &y_128, &init_pos.y, 1.0 / zoom_128, fdd{ restrict_world_rect.y1 }, fdd{ restrict_world_rect.y2 }, format))
+    //    changed = true;
+
+    bl_table_invoke(bl_dispatch_table_callable([&]<typename T>()
+    {
+        T cam_x = x<T>();
+        if (ImGui::RevertableDragFltxCompact<T>("X", &cam_x, &init_pos.x, (T)(1.0 / zoom_64), (T)world_bounds.x1, (T)world_bounds.x2, decimals))
+        {
+            setX(cam_x);
+            changed = true;
+        }
+    }), bl_enum_type(max_precision));
     ImGui::SetNextItemWidthForSpace(required_space);
-    if (ImGui::RevertableDragFloat128("Y", &y_128, &init_pos.y, 1.0 / zoom_128, f128{ restrict_world_rect.y1 }, f128{ restrict_world_rect.y2 }, format))
-        changed = true;
+    bl_table_invoke(bl_dispatch_table_callable([&]<typename T>()
+    {
+        T cam_y = y<T>();
+        if (ImGui::RevertableDragFltxCompact<T>("Y", &cam_y, &init_pos.y, (T)(1.0 / zoom_64), (T)world_bounds.y1, (T)world_bounds.y2, decimals))
+        {
+            setY(cam_y);
+            changed = true;
+        }
+    }), bl_enum_type(max_precision));
 
     ImGui::SetNextItemWidthForSpace(required_space);
     if (ImGui::RevertableSliderAngle("Rotation", &rotation_64, &init_rotation))
         changed = true;
 
-    f128 relative_zoom = relativeZoom<f128>();
-    f128 zoom_speed = relative_zoom / 100.0;
+    /// //fqd relative_zoom = relativeZoom();
+    f64 relative_zoom = relativeZoom();
+    /// //fqd zoom_speed = relative_zoom / 100.0;
+    f64 zoom_speed = relative_zoom / 100.0;
     ImGui::SetNextItemWidthForSpace(required_space);
-    if (ImGui::RevertableDragFloat128("Zoom", &relative_zoom, &init_zoom, zoom_speed, 0.1_dd, 1e32_dd, "%.2f"))
+    /// //if (ImGui::RevertableDragFltx<fqd>("Zoom", &relative_zoom, &init_zoom, zoom_speed, 0.1_qd, 1.0e62_qd, 5))
+    /// if (ImGui::RevertableDragFltx("Zoom", &relative_zoom, &init_zoom, zoom_speed, 0.1, 1.0e62, 5))
+    /// {
+    ///     setRelativeZoom((f64)relative_zoom);
+    ///     changed = true;
+    /// }
+    if (ImGui::RevertableDragFltx("Zoom", &relative_zoom, &init_zoom, zoom_speed, 0.1, 1.0e62, 6))
     {
         zoom_speed = relative_zoom / 100.0;
-        zoom_128 = relative_zoom * getReferenceZoom<f128>();
+        //zoom_64 = relative_zoom * getReferenceZoom();
+        setRelativeZoom(relative_zoom);
         changed = true;
     }
 
@@ -246,18 +329,24 @@ void CameraInfo::populateUI(DRect restrict_world_rect)
 
     if (changed)
     {
-        zoomDirty();
-        posDirty();
+        posChanged<fqd>();
+        zoomChanged();
     }
 
     return;
 }
 
-void CameraNavigator::restrictRelativeZoomRange(f128 min, f128 max)
+void CameraNavigator::restrictRelativeZoomRange(f64 min, f64 max)
 {
     min_zoom = min;
     max_zoom = max;
-    panZoomProcess();
+
+    if (!camera)
+        return;
+    if (camera->zoom() < camera->getReferenceZoom() * min_zoom)
+        camera->setZoom(camera->getReferenceZoom() * min_zoom);
+    if (camera->zoom() > camera->getReferenceZoom() * max_zoom)
+        camera->setZoom(camera->getReferenceZoom() * max_zoom);
 }
 
 void CameraNavigator::panBegin(int _x, int _y, double touch_dist, double touch_angle)
@@ -273,14 +362,14 @@ void CameraNavigator::panBegin(int _x, int _y, double touch_dist, double touch_a
     if (direct_cam_panning)
     {
         //DVec2 world_mouse = toWorld(x, y);
-        pan_beg_cam_x = camera->x<f128>();
-        pan_beg_cam_y = camera->y<f128>();
-        pan_beg_cam_zoom = camera->zoom<f128>();
+        pan_beg_cam_x = camera->x<fqd>();
+        pan_beg_cam_y = camera->y<fqd>();
+        pan_beg_cam_zoom = camera->zoom();
         ///pan_beg_cam_zoom_x = zoom_x;
         ///pan_beg_cam_zoom_y = zoom_y;
         pan_beg_cam_angle = camera->rotation();
 
-        //last_pan_snapped_cam_grid_pos = DDVec2(x_128 * zoom_x, y_128 * zoom_y).snapped(f128(cam_pos_stage_snap_size));
+        //last_pan_snapped_cam_grid_pos = DDVec2(x_128 * zoom_x, y_128 * zoom_y).snapped(fdd(cam_pos_stage_snap_size));
     }
     else
     {
@@ -290,7 +379,7 @@ void CameraNavigator::panBegin(int _x, int _y, double touch_dist, double touch_a
     panning = true;
 }
 
-bool CameraNavigator::panDrag(int _x, int _y, double touch_dist, double touch_angle)
+bool CameraNavigator::panDrag(const SurfaceInfo& surface, int _x, int _y, double touch_dist, double touch_angle)
 {
     //blPrint("[DRAG] Cam Pos: (%.3f, %.3f) Zoom: (%.3f, %.3f) Angle: %.3f",
     //    (double)x, (double)y, (double)zoom_x, (double)zoom_y, cam_rotation);
@@ -308,12 +397,12 @@ bool CameraNavigator::panDrag(int _x, int _y, double touch_dist, double touch_an
             int dy = _y - pan_down_touch_y;
 
 
-            DDVec2 world_offset = camera->getTransform().toWorldOffset<f128>(dx, dy);
+            QDVec2 world_offset = camera->transformFor(surface).toWorldOffset<fqd>(dx, dy);
             //blPrint("(dx,dy) = (%.3f, %.3f)", world_offset.x, world_offset.y);
             //blPrint() << "(dx,dy) = (" << bl::dp(3) << world_offset.x << ", " << world_offset.)y
 
-            f128 new_cam_world_x = pan_beg_cam_x - world_offset.x;
-            f128 new_cam_world_y = pan_beg_cam_y - world_offset.y;
+            fqd new_cam_world_x = pan_beg_cam_x - world_offset.x;
+            fqd new_cam_world_y = pan_beg_cam_y - world_offset.y;
 
             changed |= camera->setPos(
                 new_cam_world_x,
@@ -359,8 +448,8 @@ bool CameraNavigator::panDrag(int _x, int _y, double touch_dist, double touch_an
             int dy = _y - pan_down_touch_y;
 
             changed |= camera->setPan(
-                (double)(pan_beg_cam_x + (dx/*/ zoom_x*/) /* * pan_mult*/),
-                (double)(pan_beg_cam_y + (dy/*/ zoom_y*/) /* * pan_mult*/)
+                (f64)(pan_beg_cam_x + ((f64)dx/*/ zoom_x*/) /* * pan_mult*/),
+                (f64)(pan_beg_cam_y + ((f64)dy/*/ zoom_y*/) /* * pan_mult*/)
             );
         }
     }
@@ -368,23 +457,23 @@ bool CameraNavigator::panDrag(int _x, int _y, double touch_dist, double touch_an
     return changed;
 }
 
-bool CameraNavigator::panZoomProcess()
+bool CameraNavigator::panZoomProcess(const SurfaceInfo& surface)
 {
     bool changed = false;
-    if (camera->zoom<f128>() < camera->getReferenceZoom<f128>() * min_zoom)
-        changed |= camera->setZoom(camera->getReferenceZoom<f128>() * min_zoom);
-    if (camera->zoom<f128>() > camera->getReferenceZoom<f128>() * max_zoom)
-        changed |= camera->setZoom(camera->getReferenceZoom<f128>() * max_zoom);
+    if (camera->zoom() < camera->getReferenceZoom() * min_zoom)
+        changed |= camera->setZoom(camera->getReferenceZoom() * min_zoom);
+    if (camera->zoom() > camera->getReferenceZoom() * max_zoom)
+        changed |= camera->setZoom(camera->getReferenceZoom() * max_zoom);
 
     if (fingers.size() == 1)
     {
-        changed |= panDrag((int)fingers[0].x, (int)fingers[0].y, 0.0, 0.0);
+        changed |= panDrag(surface, (int)fingers[0].x, (int)fingers[0].y, 0.0, 0.0);
     }
     else if (fingers.size() == 2)
     {
         double avg_x = (fingers[0].x + fingers[1].x) / 2.0;
         double avg_y = (fingers[0].y + fingers[1].y) / 2.0;
-        changed |= panDrag((int)avg_x, (int)avg_y, touchDist(), touchAngle());
+        changed |= panDrag(surface, (int)avg_x, (int)avg_y, touchDist(), touchAngle());
     }
 
     return changed;
@@ -398,10 +487,11 @@ void CameraNavigator::panEnd()
 
 bool CameraNavigator::handleWorldNavigation(Event event, bool single_touch_pan, bool zoom_anchor_mouse, double wheel_zoom_rate)
 {
-    Viewport* viewport = event.ctx_focused();
-    if (!viewport) return false;
+    if (!camera || !event.isPointerEvent())
+        return false;
 
-    if (!event.ownedBy(viewport->mountedScene()) || !event.isPointerEvent())
+    Viewport* viewport = event.ctx_owner();
+    if (!viewport)
         return false;
 
     PointerEvent e(event);
@@ -416,8 +506,6 @@ bool CameraNavigator::handleWorldNavigation(Event event, bool single_touch_pan, 
                 // Ignore 3 or more fingers
                 return false;
             }
-
-            blPrint() << "SDL_EVENT_FINGER_DOWN";
 
             // Add pressed finger
             FingerInfo info;
@@ -503,7 +591,7 @@ bool CameraNavigator::handleWorldNavigation(Event event, bool single_touch_pan, 
                 }
             }
 
-            return panZoomProcess();
+            return panZoomProcess(*viewport);
         }
         break;
         }
@@ -512,8 +600,6 @@ bool CameraNavigator::handleWorldNavigation(Event event, bool single_touch_pan, 
     {
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
         {
-            blPrint() << "SDL_EVENT_MOUSE_BUTTON_DOWN";
-
             if (fingers.size() == 0)
             {
                 FingerInfo info;
@@ -550,7 +636,7 @@ bool CameraNavigator::handleWorldNavigation(Event event, bool single_touch_pan, 
                 info.y = e.y();
             }
 
-            return panZoomProcess();
+            return panZoomProcess(*viewport);
             //if (panning)
             //    panDrag((int)e.x(), (int)e.y(), 0.0, 0.0);
         }
@@ -571,7 +657,7 @@ bool CameraNavigator::handleWorldNavigation(Event event, bool single_touch_pan, 
             //else
             {
                 camera->setZoom(camera->zoom() + ((e.wheelY()/10.0) * wheel_zoom_rate) * camera->zoom());
-                panZoomProcess();
+                panZoomProcess(*viewport);
                 return true;
             }
         }

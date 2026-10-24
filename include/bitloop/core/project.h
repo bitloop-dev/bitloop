@@ -1,16 +1,30 @@
 #pragma once
 
+#include <atomic>
+#include <cassert>
+#include <cstdint>
 #include <vector>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <functional>
+#include <initializer_list>
+#include <mutex>
+#include <optional>
+#include <type_traits>
+#include <utility>
 
-#include <bitloop/util/debug_timer.h>
+#include <bitloop/util/json.h>
 #include <bitloop/util/timer.h>
-#include <bitloop/platform/platform.h>
+#include <bitloop/util/thread_queue.h>
 #include <bitloop/core/interface_model.h>
-#include <bitloop/core/snapshot_presets.h>
-#include <bitloop/core/capture_manager.h>
-#include <bitloop/imguix/imguix.h>
+
+#ifdef BITLOOP_DEV_MODE
+    #include <filesystem>
+    #include <bitloop/core/sim_checkpoint.h>
+    #include <bitloop/core/sim_snapshot.h>
+    #include <bitloop/core/sim_trace.h>
+#endif
 
 #include "input.h"
 #include "layout.h"
@@ -34,6 +48,13 @@ class Viewport;
 class ProjectBase;
 class ProjectManager;
 class NanoCanvas;
+class SceneBase;
+
+class CaptureContext;
+class CapturePreset;
+class SnapshotPresetManager;
+struct EncodeFrame;
+struct SettingsConfig;
 
 struct ImDebugLog;
 
@@ -193,10 +214,41 @@ struct ProjectInfoNode
     }
 };
 
+#ifdef BITLOOP_DEV_MODE
+struct SceneCatalogueEntry
+{
+    std::string id;
+    std::size_t ordinal = 0;
+    bool selectable = false;
+    bool selected_by_default = false;
+};
+#endif
+
 class ProjectBase
 {
+    struct SceneRecord;
+
     Layout viewports;
-    int scene_counter = 0;
+    std::vector<std::unique_ptr<SceneRecord>> scene_records;
+    std::vector<SceneBase*> active_scenes;
+    std::shared_ptr<SceneHandleState> scene_handle_state = std::make_shared<SceneHandleState>();
+    std::vector<std::uint64_t> default_scene_tokens;
+    std::uint64_t next_scene_token = 1;
+    std::size_t next_scene_ordinal = 0;
+    std::uint64_t scene_generation = 0;
+    bool declaring_scenes = false;
+    bool defaults_specified = false;
+    std::mutex structural_mutation_mutex;
+    std::vector<std::function<void()>> structural_mutations;
+    bool iterating_lifecycle = false;
+    bool tearing_down = false;
+
+#ifdef BITLOOP_DEV_MODE
+    std::optional<std::vector<std::string>> headless_scene_selection;
+    std::optional<JSON::json> headless_scene_config;
+    std::string headless_scene_config_hash;
+#endif
+
     int sim_uid = -1;
 
     SimpleTimer project_timer;
@@ -205,8 +257,7 @@ class ProjectBase
 
     double      project_dt = 0;
     double      frame_dt = 0;
-
-    const int splitter_thickness = 6;
+    std::atomic<std::int64_t> completedFrameCount{ 0 };
 
     // Keep track of focused/hovered project viewports
     Viewport* ctx_focused = nullptr;
@@ -216,22 +267,88 @@ class ProjectBase
     friend class ProjectWorker;
     friend class Layout;
     friend class SceneBase;
+    friend class SceneHandleBase;
     friend class Viewport;
 
     NanoCanvas* canvas = nullptr;
     ImDebugLog* project_log = nullptr;
+    CaptureContext* capture_context = nullptr;
 
     // ----- states -----
     bool started = false;
     bool paused = false;
     bool done_single_process = false;
     DVec2 old_surface_size{};
+#ifdef BITLOOP_DEV_MODE
+    bool headless_mode = false;
+    ThreadQueue headless_thread_queue;
+    IVec2 headless_surface_size{ 800, 600 };
+    std::int64_t trace_context_frame = 0;
+    double trace_context_time = 0.0;
+    double trace_context_dt = 0.0;
+    std::vector<SimSnapshotRecord> pending_trace_snapshots;
+    std::vector<EventData> headless_input_event_queue;
+#endif
     bool show_fullscreen_btn = true;
     bool immediate_update_requested = false;
 
-    void configure(int sim_uid, NanoCanvas* canvas, ImDebugLog* project_log);
+    void configure(int sim_uid, NanoCanvas* canvas, ImDebugLog* project_log, CaptureContext* capture_context);
+
+    SceneHandleBase declareScene(
+        std::string id,
+        std::shared_ptr<void> config,
+        std::function<std::unique_ptr<SceneBase>()> factory);
+    [[nodiscard]] SceneRecord* findSceneRecord(std::uint64_t token, std::uint64_t generation) noexcept;
+    [[nodiscard]] const SceneRecord* findSceneRecord(std::uint64_t token, std::uint64_t generation) const noexcept;
+    [[nodiscard]] bool ownsSceneHandle(const SceneHandleBase& handle) const noexcept;
+    [[nodiscard]] SceneBase* resolveSceneHandle(const SceneHandleBase& handle) const noexcept;
+    [[nodiscard]] std::string sceneHandleId(const SceneHandleBase& handle) const;
+	
+    void registerSceneLaunchConfigParser(
+        const SceneHandleBase& handle,
+        std::function<void(const JSON::json&)> parser);
+    void declareSceneCatalogue();
+    void applySceneSelection();
+
+#ifdef BITLOOP_DEV_MODE
+    void applyHeadlessSceneConfig();
+#endif
+
+    void materializeSelectedScenes();
+    void materializeRuntimeScene(std::uint64_t token);
+    void destroyScene(std::uint64_t token);
+    void initializeScene(SceneRecord& record);
+    void destroySceneUI(SceneBase& scene);
+    void enqueueStructuralMutation(std::function<void()> mutation);
+    void commitStructuralMutations(bool gui_access_excluded = false);
+    void discardStructuralMutations();
+    [[nodiscard]] bool shouldDeferStructuralMutation() const noexcept;
+    void releaseViewportReferences(Viewport* viewport);
+    void clearSceneRecords();
+
+#ifdef BITLOOP_DEV_MODE
+    [[nodiscard]] Viewport* resolveSnapshotViewport(
+        std::string_view scene_id,
+        std::string_view viewport_id,
+        std::string& error) const;
+#endif
 
     bool updateViewportRects();
+
+    struct InputDispatchContext
+    {
+        bool headless = false;
+        bool viewport_hovered = true;
+        IVec2 surface_size{ 0, 0 };
+        bool allow_fullscreen_hotkeys = true;
+    };
+
+    void _dispatchInputEvent(const EventData& e, const InputDispatchContext& context);
+    [[nodiscard]] Viewport* hitTestViewport(DVec2 client_position) const;
+
+#ifdef BITLOOP_DEV_MODE
+    void _dispatchQueuedHeadlessInputEvents();
+#endif
 
 protected:
 
@@ -252,6 +369,7 @@ protected:
     void _projectDestroy();
     void _projectProcess();
     void _projectDraw();
+    void drawViewport(Viewport& viewport, NanoCanvas& target_canvas);
     void _onEndFrame(); // called after worker process & after gui render, just before next project process
 
     // ----- capturing -----
@@ -262,7 +380,7 @@ protected:
     std::vector<FingerInfo> pressed_fingers;
     bool any_fingers_pressed = false;
     void _clearEventQueue();
-    void _onEvent(SDL_Event& e);
+    void _onEvent(const EventData& e);
 
 
     // ----- data buffers -----
@@ -282,12 +400,56 @@ public:
 
     static ProjectBase* activeProject();
 
+    ProjectBase();
+
+#ifdef BITLOOP_DEV_MODE
+    void configureHeadless(int sim_uid, ImDebugLog* project_log, IVec2 surface_size, CaptureContext* capture_context, NanoCanvas* render_canvas = nullptr);
+    void startHeadless();
+    void prepareHeadlessSceneCatalogue();
+    void setHeadlessSceneSelection(std::vector<std::string> scene_ids);
+    void setHeadlessSceneConfig(JSON::json values);
+    [[nodiscard]] std::vector<SceneCatalogueEntry> sceneCatalogue() const;
+    [[nodiscard]] std::vector<std::string> selectedSceneIds() const;
+    [[nodiscard]] const std::string& headlessSceneConfigHash() const noexcept { return headless_scene_config_hash; }
+    void queueHeadlessInputEvent(const EventData& event);
+    void clearHeadlessInputEvents();
+    void processHeadlessFrame(double dt);
+    void stopHeadless();
+    void setTraceFrameContext(std::int64_t frame, double time, double dt);
+    void requestTraceSnapshot(const SceneBase* scene, SimSnapshotRequest request);
+    [[nodiscard]] std::vector<SimSnapshotRecord> takeTraceSnapshotRequests();
+    bool captureTraceSnapshot(SimSnapshotRecord& record, SimSnapshotImage& image) const;
+    bool renderLayout(NanoCanvas& render_canvas, IVec2 resolution, std::string& error);
+    bool renderViewport(NanoCanvas& render_canvas, SimSnapshotRecord& record);
+    void onHeadlessEncodeFrame(EncodeFrame& data, const CapturePreset& preset);
+    bool saveHeadlessCheckpoint(
+        const std::filesystem::path& checkpoint_dir,
+        std::int64_t frame,
+        double time,
+        double dt) const;
+    bool loadHeadlessCheckpoint(const std::filesystem::path& checkpoint_dir);
+    [[nodiscard]] std::vector<SimTraceFrame> collectTraceFrames(
+        std::int64_t frame,
+        double time,
+        double dt,
+        std::size_t max_objects = SimTraceFrame::default_max_objects) const;
+#endif
+
     // todo: improve access
     MouseInfo mouse;
 
-    virtual ~ProjectBase() = default;
+    virtual ~ProjectBase();
 
     virtual InterfaceModel* getInterfaceModel() = 0;
+
+    [[nodiscard]] CaptureContext& captureContext();
+    [[nodiscard]] const CaptureContext& captureContext() const;
+    [[nodiscard]] SettingsConfig& captureSettings();
+    [[nodiscard]] const SettingsConfig& captureSettings() const;
+    [[nodiscard]] SnapshotPresetManager& snapshotPresetManager();
+    [[nodiscard]] const SnapshotPresetManager& snapshotPresetManager() const;
+    [[nodiscard]] bool isHeadless() const;
+    [[nodiscard]] ThreadQueue& renderThreadQueue();
     
     /// ----- Project factory -----
 
@@ -388,57 +550,74 @@ public:
 
     /// ----- Scene factory -----
 
-    // create Scene with default config
     template<typename SceneType>
-    [[nodiscard]] SceneType* create()
+    [[nodiscard]] SceneHandle<SceneType> create()
     {
         auto config = std::make_shared<typename SceneType::Config>();
-        SceneType* scene;
-
-        if constexpr (std::is_constructible_v<SceneType, typename SceneType::Config&>)
+        auto factory = [config]() -> std::unique_ptr<SceneBase>
         {
-            scene = new SceneType(*config);
-            scene->active_config = config;
-        }
-        else
-            scene = new SceneType();
+            if constexpr (std::is_constructible_v<SceneType, typename SceneType::Config&>)
+                return std::make_unique<SceneType>(*config);
+            else
+                return std::make_unique<SceneType>();
+        };
 
-        scene->project = this;
-        scene->scene_index = scene_counter++;
-        return scene;
+        return SceneHandle<SceneType>(declareScene({}, config, std::move(factory)), config);
     }
 
-    // create Scene with a provided initial config
     template<typename SceneType>
-    [[nodiscard]] SceneType* create(typename SceneType::Config config)
+    [[nodiscard]] SceneHandle<SceneType> create(typename SceneType::Config config)
     {
-        auto config_ptr = std::make_shared<typename SceneType::Config>(config);
+        auto config_ptr = std::make_shared<typename SceneType::Config>(std::move(config));
+        auto factory = [config_ptr]() -> std::unique_ptr<SceneBase>
+        {
+            return std::make_unique<SceneType>(*config_ptr);
+        };
 
-        SceneType* scene = new SceneType(*config_ptr);
-        scene->active_config = config_ptr;
-        scene->scene_index = scene_counter++;
-        scene->project = this;
-        return scene;
+        return SceneHandle<SceneType>(declareScene({}, config_ptr, std::move(factory)), config_ptr);
     }
 
-    // overload to support using active_config from an existing Scene
     template<typename SceneType>
-    [[nodiscard]] SceneType* create(std::shared_ptr<typename SceneType::Config> config)
+    [[nodiscard]] SceneHandle<SceneType> create(std::string id)
     {
-        if (!config)
-            throw "Launch Config wasn't created";
+        auto config = std::make_shared<typename SceneType::Config>();
+        auto factory = [config]() -> std::unique_ptr<SceneBase>
+        {
+            if constexpr (std::is_constructible_v<SceneType, typename SceneType::Config&>)
+                return std::make_unique<SceneType>(*config);
+            else
+                return std::make_unique<SceneType>();
+        };
 
-        SceneType* scene = new SceneType(*config);
-        scene->active_config = config;
-        scene->scene_index = scene_counter++;
-        scene->project = this;
-        return scene;
+        return SceneHandle<SceneType>(declareScene(std::move(id), config, std::move(factory)), config);
     }
 
-    /// ----- layout -----
+    template<typename SceneType>
+    [[nodiscard]] SceneHandle<SceneType> create(std::string id, typename SceneType::Config config)
+    {
+        auto config_ptr = std::make_shared<typename SceneType::Config>(std::move(config));
+        auto factory = [config_ptr]() -> std::unique_ptr<SceneBase>
+        {
+            return std::make_unique<SceneType>(*config_ptr);
+        };
 
-    Layout& newLayout();
-    Layout& newLayout(int _viewports_x, int _viewports_y);
+        return SceneHandle<SceneType>(declareScene(std::move(id), config_ptr, std::move(factory)), config_ptr);
+    }
+
+    void setDefaultScenes(std::initializer_list<SceneHandleBase> scenes);
+    void destroy(SceneHandleBase scene);
+
+    [[nodiscard]] const std::vector<SceneBase*>& scenes() const
+    {
+        return active_scenes;
+    }
+
+    template<typename T>
+    [[nodiscard]] T& getActiveScene(int index) const
+    {
+        return static_cast<T&>(*active_scenes[index]);
+    }
+
     [[nodiscard]] Layout& currentLayout()
     {
         return viewports;
@@ -457,6 +636,13 @@ public:
     }
 
     [[nodiscard]] bool isPaused() const { return paused; }
+
+    // Zero-based completed frame within this run; zero before the first step.
+    [[nodiscard]] std::int64_t currentFrameIndex() const
+    {
+        const std::int64_t count = completedFrameCount.load(std::memory_order_relaxed);
+        return count > 0 ? count - 1 : 0;
+    }
     [[nodiscard]] bool isActive() const { return started; } // in "started/paused" state (but not stopped)
 
     #ifdef BITLOOP_DEV_MODE
@@ -484,14 +670,7 @@ public:
     // If DEFINED     (BITLOOP_DEV_MODE):  "root" = project folder
     // If NOT DEFINED (BITLOOP_DEV_MODE):  "root" = exe folder
     
-    [[nodiscard]] std::string rootPath(std::string_view virtual_path) const
-    {
-        #ifdef BITLOOP_DEV_MODE
-        return projectPath(virtual_path);
-        #else
-        return platform()->path(virtual_path);
-        #endif
-    }
+    [[nodiscard]] std::string rootPath(std::string_view virtual_path) const;
 
     /// ----- overridable virtual methods -----
 
@@ -505,6 +684,11 @@ public:
     virtual void projectStart() {}
     virtual void projectStop() {}
     virtual void projectDestroy() {}
+	
+#ifdef BITLOOP_DEV_MODE
+    virtual bool saveCheckpoint(SimCheckpointWriter&) const { return false; }
+    virtual bool loadCheckpoint(const SimCheckpointReader&) { return false; }
+#endif
 
     virtual void onEvent(Event&) {}
 
@@ -532,6 +716,10 @@ class BasicProject : public ProjectBase, public DirectInterfaceModel
     {
         return static_cast<InterfaceModel*>(this);
     }
+
+public:
+
+    using ProjectBase::destroy;
 };
 
 template<typename ProjectType>
@@ -541,6 +729,7 @@ class Project : public ProjectBase, public VarBuffer<ProjectType>
 
 public:
 
+    using ProjectBase::destroy;
     using BufferedInterfaceModel = DoubleBufferedInterfaceModel<ProjectType>;
     BufferedInterfaceModel* ui = nullptr;
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <bitloop/platform/platform_macros.h>
+
 #include <bit>
 #include <cstdint>
 #include <span>
@@ -13,6 +15,9 @@ using hash_t = std::uint64_t;
 struct StableHasher
 {
 private:
+
+    template<class>
+    static inline constexpr bool dependent_false_v = false;
 
     hash_t seed = 0;
     hash_t count = 0;
@@ -101,13 +106,16 @@ public:
             using U = std::underlying_type_t<T>;
             return hash_one(static_cast<U>(v));
         }
-        else if constexpr (std::is_integral_v<T> || std::is_pointer_v<T>) {
+        else if constexpr (std::is_integral_v<T>) {
             return mix64(static_cast<hash_t>(v));
         }
+        else if constexpr (std::is_pointer_v<T>) {
+            static_assert(dependent_false_v<T>,
+                "StableHasher cannot hash pointer addresses because they are not stable across processes.");
+        }
         else {
-            static_assert(std::is_trivially_copyable_v<T>,
-                "StableHasher::hash_one(T): Provide a stable hashing implementation for this type.");
-            return hash_bytes(&v, sizeof(T));
+            static_assert(dependent_false_v<T>,
+                "StableHasher::hash_one(T): Hash the type's logical fields explicitly; raw object representations are not portable.");
         }
     }
 
@@ -161,11 +169,14 @@ public:
 
 struct Hashable
 {
-    using hash_t = std::uint64_t;
+    using hash_t = bl::hash_t;
 
     virtual ~Hashable() = default;
 
-    hash_t stable_hash() const noexcept {
+    // The public hash contract is always the full stable 64-bit value, even on
+    // platforms where size_t is 32-bit. Native-size folding belongs in an STL
+    // hash adapter, never in change detection or persistence code.
+    hash_t hash() const noexcept {
         if (!cache_valid) {
             cache = compute_hash();
             cache_valid = true;
@@ -173,9 +184,11 @@ struct Hashable
         return cache;
     }
 
-    // guaranteed size_t (for stl containers)
-    std::size_t hash() const noexcept {
-        hash_t h = stable_hash();
+    // Native-width result for std::hash adapters and STL containers only.
+    // Folding is safe there because unordered containers resolve collisions
+    // with their equality predicate.
+    std::size_t stl_hash() const noexcept {
+        const hash_t h = hash();
         if constexpr (sizeof(std::size_t) >= sizeof(hash_t))
             return static_cast<std::size_t>(h);
         else

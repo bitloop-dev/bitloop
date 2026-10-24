@@ -22,7 +22,7 @@ For help getting started, view the Wiki:
   - Child projects can be opened and compiled as standalone projects
   - Cross-platform:  Windows, Linux, Emscripten
   - Designed for heavy per‑frame computations (e.g. Mandelbrot zoom)
-- C++ NanoVG wrapper with integrated 128-bit float support (**f128** class)
+- C++ NanoVG wrapper with integrated 128-bit float support (**fdd** class)
   - If you have prior experience with HTML Canvas drawing, this should feel second-nature to you
 - FFmpeg video recording without blocking the UI (Desktop only)
 - WebP snapshots / animations (all platforms).
@@ -39,6 +39,22 @@ For help getting started, view the Wiki:
       - For the root workspace folder, add:  "**root=TRUE**"
       - For child workspaces, add: "**root=FALSE**"
     - vcpkg will be automatically cloned in to the highest level folder containing a "**.bitloop-workspace**" file (but not above the root workspace)
+  - Bitloop itself is selected automatically:
+    - Gallery projects use the checked-out `bitloop` source tree, even when a child is opened directly.
+    - Framework examples use their enclosing Bitloop source tree.
+    - A detached project keeps and installs its `bitloop` vcpkg dependency.
+  - Workspace markers select shared tooling and source candidates. Child manifests are merged only through enabled `bitloop_add_dependency(...)` edges.
+
+Advanced configurations may override automatic selection with `BITLOOP_PROVIDER=SOURCE|PACKAGE` and `BITLOOP_SOURCE_DIR=<path>`.
+Project-local CMake tooling can be checked or refreshed with `bitloop tooling sync --check` and `bitloop tooling sync`.
+
+An experimental source-build target, `bitloop-core` (alias `bitloop::core`), compiles an explicit subset of simulation and ImGui implementations. See [the core build notes](docs/experimental-core.md) for build instructions and current dependency limitations.
+
+Run `bitloop new project` interactively to choose Guided or Minimal scaffolding, optional AI development files, and—when invoked inside a Git worktree—publication to an existing empty remote plus submodule registration in the nearest enclosing repository. Scripted creation uses `bitloop new project <Name> --submodule --remote <RepositoryUrl>`. The child repository is committed and pushed; the parent gitlink is staged for review but never committed automatically.
+
+Run `bitloop copy project` to copy an existing project from the current directory under a new name, or supply both names: `bitloop copy project FluidLesson FluidSim`. It keeps the source's scaffolding and offers the same Git integration (`--submodule`, `--remote`, `--no-submodule`), without the template questions. Copying requires Git to apply the source's `.gitignore` files, including nested rules and negations, even when the source is untracked or has no repository. Git metadata is always excluded; enclosing repositories and global ignore rules do not affect the copy.
+
+The copy replaces case-sensitive whole-word project names in UTF-8 text, including CMake, namespaces, includes, and project display strings. Exact `<Name>_Project` and `<Name>_Scene` identifiers are also updated; other embedded names and different capitalization are preserved. The top-level `<Name>/` source directory and C/C++ source or header files with exactly that stem are renamed; other filenames are preserved. Binary files and symbolic links are copied unchanged. The source is untouched, and existing destinations or rename collisions are rejected.
 
 ### Layout
 By default, projects contain a simple built-in viewport and sidebar for custom ImGui controls, along with a handy collection of tools/libraries.
@@ -62,7 +78,7 @@ By default, projects contain a simple built-in viewport and sidebar for custom I
 |                                           | Windows                  | Linux                    | Web (Emscripten)                                          |
 | ----------------------------------------- | ------------------------ | ------------------------ | --------------------------------------------------------- |
 | Multithreading                            | :heavy_check_mark:       | :heavy_check_mark:       | :heavy_check_mark: (pthreads with COOP/COEP Headers)      |
-| 128-bit float support (f128)              | :heavy_check_mark:       | :heavy_check_mark:       | :heavy_check_mark:                                        |
+| 128-bit float support (fdd)              | :heavy_check_mark:       | :heavy_check_mark:       | :heavy_check_mark:                                        |
 
 ### Graphics
 

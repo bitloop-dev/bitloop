@@ -112,14 +112,10 @@ public:
         pumpOnce();
     }
 
-    void drain(std::size_t max_batches = 64) noexcept
+    void drain() noexcept
     {
         assert(isOwnerThread());
-        for (std::size_t i = 0; i < max_batches; ++i)
-        {
-            if (!pumpOnce())
-                return;
-        }
+        while (pumpOnce()) {}
     }
 
 private:

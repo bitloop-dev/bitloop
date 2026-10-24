@@ -1,9 +1,9 @@
 #pragma once
+#define BL_BEGIN_NS namespace bl {
+#define BL_END_NS   }
 
-// dependencies:
-// - imgui
-// - gcem
-// - fltx
+// dependencies
+// - math_util
 
 #include <cmath>
 #include <limits>
@@ -11,143 +11,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include <fltx.h>
 
-
-// including gcem before custom float types (for potential constexpr support)
-#include <gcem.hpp>
-
-#include <bitloop/util/fltx/fltx.h>
-
-#define IMGUI_DEFINE_MATH_OPERATORS
-#include <imgui.h>
-
-
-#define BL_BEGIN_NS namespace bl {
-#define BL_END_NS   }
-
-namespace bl
-{
-    namespace detail
-    {
-        template<class R, class ExpUnsigned>
-        constexpr R ipow_nonneg(R base, ExpUnsigned exp)
-        {
-            R result = R(1);
-
-            while (exp)
-            {
-                if (exp & ExpUnsigned(1))
-                    result *= base;
-
-                exp >>= 1;
-
-                if (exp)
-                    base *= base;
-            }
-
-            return result;
-        }
-    }
-
-    // drop gcem functions in 'bl' namespace where overloads already exist for f128/... (constexpr used where supported)
-
-    using std::isnan;
-    using std::isinf;
-    using std::isfinite;
-    using std::remainder; // no gcem equivelant
-
-    template<class T> constexpr T abs(T x)   { if consteval { return gcem::abs(x);   } else { return std::abs(x);   } }
-    template<class T> constexpr T floor(T x) { if consteval { return gcem::floor(x); } else { return std::floor(x); } }
-    template<class T> constexpr T ceil(T x)  { if consteval { return gcem::ceil(x);  } else { return std::ceil(x);  } }
-    template<class T> constexpr T round(T x) { if consteval { return gcem::round(x); } else { return std::round(x); } }
-    template<class T> constexpr T cos(T x)   { if consteval { return gcem::cos(x);   } else { return std::cos(x);   } }
-    template<class T> constexpr T sin(T x)   { if consteval { return gcem::sin(x);   } else { return std::sin(x);   } }
-    template<class T> constexpr T tan(T x)   { if consteval { return gcem::tan(x);   } else { return std::tan(x);   } }
-    template<class T> constexpr T atan(T x)  { if consteval { return gcem::atan(x);  } else { return std::atan(x);  } }
-    template<class T> constexpr T sqrt(T x)  { if consteval { return gcem::sqrt(x);  } else { return std::sqrt(x);  } }
-    template<class T> constexpr T exp(T x)   { if consteval { return gcem::exp(x);   } else { return std::exp(x);   } }
-    template<class T> constexpr T log(T x)   { if consteval { return gcem::log(x);   } else { return std::log(x);   } }
-    template<class T> constexpr T log2(T x)  { if consteval { return gcem::log2(x);  } else { return std::log2(x);  } }
-    template<class T> constexpr T log10(T x) { if consteval { return gcem::log10(x); } else { return std::log10(x); } }
-    template<class T> constexpr T trunc(T x) { if consteval { return gcem::trunc(x); } else { return std::trunc(x); } }
-
-    template<class T> T clamp(T x, T a, T b) {
-        if (x < a)
-            return a;
-        else if (x > b)
-            return b;
-        else
-            return x;
-    }
-
-
-    template<class T, class U> constexpr T atan2(T y, U x) { if consteval { return gcem::atan2(y, x); } else { return std::atan2(y, x); } }
-    template<class T, class U> constexpr T fmod(T x, U y)  { if consteval { return gcem::fmod(x, y);  } else { return std::fmod(x, y);  } }
-    template<class T, class U> constexpr std::common_type_t<T, U> pow(T x, U y)
-    {
-        using R = std::common_type_t<T, U>;
-
-        if constexpr (std::is_integral_v<T> && std::is_integral_v<U>)
-        {
-            const R base = static_cast<R>(x);
-
-            if constexpr (std::is_signed_v<U>)
-            {
-                if (y < 0)
-                {
-                    // integral result cannot represent reciprocals
-                    if (base == R(1))  return R(1);
-                    if (base == R(-1)) return (y % 2 != 0) ? R(-1) : R(1);
-                    return R(0);
-                }
-            }
-
-            using Uu = std::make_unsigned_t<std::remove_cv_t<U>>;
-            const Uu exp = static_cast<Uu>(y);
-
-            return detail::ipow_nonneg<R, Uu>(base, exp);
-        }
-        else
-        {
-            const R base = static_cast<R>(x);
-            const R exp = static_cast<R>(y);
-
-            if consteval {
-                return gcem::pow(base, exp);
-            }
-            else
-            {
-                return std::pow(base, exp);
-            }
-        }
-    }
-
-    template<class T> constexpr T sq(T x) { return (x * x); }
-
-    typedef int8_t   i8;
-    typedef int16_t  i16;
-    typedef int32_t  i32;
-    typedef int64_t  i64;
-
-    typedef uint8_t  u8;
-    typedef uint16_t u16;
-    typedef uint32_t u32;
-    typedef uint64_t u64;
-
-    typedef float  f32;
-    typedef double f64;
-    // ........... f128;
-
-}
-
-BL_BEGIN_NS
-
-template<typename T> concept is_floating_point_v = std::is_floating_point_v<T> || std::same_as<T, f128>;
-template<class T>    concept is_arithmetic_v     = std::is_arithmetic_v<T> || std::is_same_v<T, f128>;
-template<typename T> concept is_integral_v       = std::is_integral_v<T>;
-
+using namespace bl::literals;
+using namespace bl::types;
 
 // Forward declare math helpers for access
+
+BL_BEGIN_NS
 
 namespace math {
     template<typename T>
@@ -163,27 +34,18 @@ enum struct Anchor
     BOTTOM_LEFT,  BOTTOM,  BOTTOM_RIGHT
 };
 
-// list of currently supported number types for all types in this header
-enum struct FloatingPointType
-{
-    F32,
-    F64,
-    F128,
-    COUNT
-};
 
 // ----- Vec2 -----
 
 template<typename T>
 struct Vec2
 {
-    T x, y;
+    storage_t<T> x, y;
 
     // constructors
     Vec2() = default;
     constexpr Vec2(T v) : x{ v }, y{ v } {}
     constexpr Vec2(T _x, T _y) : x{ _x }, y{ _y } {}
-    constexpr Vec2(const ImVec2 rhs) : x{ (T)rhs.x }, y{ (T)rhs.y } {}
 
     // convenience
     constexpr void set(T _x, T _y) { x = _x; y = _y; }
@@ -191,13 +53,12 @@ struct Vec2
     [[nodiscard]] constexpr bool eq(T _x, T _y) const { return (x == _x && y == _y); }
 
     // conversions
-    [[nodiscard]] constexpr explicit operator ImVec2()                   const { return ImVec2((f32)x, (f32)y); }
     template<typename T2> [[nodiscard]] constexpr operator Vec2<T2>()    const { return Vec2<T2>{(T2)x, (T2)y}; }
 
     // access
-    [[nodiscard]] constexpr const T& operator[](int i) const { return (&x)[i]; }
-    [[nodiscard]] constexpr T& operator[](int i) { return (&x)[i]; }
-    [[nodiscard]] constexpr T* data() { return &x; }
+    [[nodiscard]] constexpr const storage_t<T>& operator[](int i) const { return (&x)[i]; }
+    [[nodiscard]] constexpr storage_t<T>& operator[](int i) { return (&x)[i]; }
+    [[nodiscard]] constexpr storage_t<T>* data() { return &x; }
 
     // operator
     [[nodiscard]] constexpr Vec2 operator-() const { return Vec2(-x, -y); }
@@ -218,7 +79,6 @@ struct Vec2
     template<typename U> requires requires(T a, U b) { a * b; } constexpr void operator*=(U v) { x = x * v; y = y * v; }
     template<typename U> requires requires(T a, U b) { a / b; } constexpr void operator/=(U v) { x = x / v; y = y / v; }
 
-    
     // properties
     [[nodiscard]] constexpr T angle() const { return atan2(y, x); }
     [[nodiscard]] constexpr T average() const { return (x + y) / T{ 2 }; }
@@ -227,6 +87,7 @@ struct Vec2
     [[nodiscard]] constexpr T dot(const Vec2& other) const { return x * other.x + y * other.y; }
     [[nodiscard]] constexpr T angleTo(const Vec2& b) const { return atan2(b.y - y, b.x - x); }
     [[nodiscard]] constexpr bool isZero() const { return x == (T)0 && y == (T)0; }
+    [[nodiscard]] constexpr bool isFinite() const { return std::isfinite(x) && std::isfinite(y); }
 
     // operators
     [[nodiscard]] constexpr Vec2 snapped(T step) const { return { round(x/step)*step, round(y/step)*step }; }
@@ -251,7 +112,7 @@ struct Vec2
 template<typename T>
 struct Vec3
 {
-    T x, y, z;
+    storage_t<T> x, y, z;
 
     // constructors
     Vec3() = default;
@@ -261,9 +122,9 @@ struct Vec3
     template<typename T2> constexpr operator Vec3<T2>()    const { return Vec3<T2>{(T2)x, (T2)y, (T2)z}; }
 
     // access
-    [[nodiscard]] constexpr const T& operator[](int i) const { return (&x)[i]; }
-    [[nodiscard]] constexpr T& operator[](int i) { return (&x)[i]; }
-    [[nodiscard]] constexpr T* data() { return &x; }
+    [[nodiscard]] constexpr const storage_t<T>& operator[](int i) const { return (&x)[i]; }
+    [[nodiscard]] constexpr storage_t<T>& operator[](int i) { return (&x)[i]; }
+    [[nodiscard]] constexpr storage_t<T>* data() { return &x; }
 
     // arithmetic
     [[nodiscard]] constexpr Vec3 operator-() const { return Vec3(-x, -y, -z); }
@@ -308,7 +169,7 @@ struct Vec3
 template<typename T>
 struct Vec4
 {
-    T x, y, z, w;
+    storage_t<T> x, y, z, w;
 
     // constructors
     Vec4() = default;
@@ -318,9 +179,9 @@ struct Vec4
     template<typename T2> constexpr operator Vec4<T2>()    const { return Vec4<T2>{(T2)x, (T2)y, (T2)z, (T2)w}; }
 
     // access
-    [[nodiscard]] constexpr const T& operator[](int i) const { return (&x)[i]; }
-    [[nodiscard]] constexpr T& operator[](int i) { return (&x)[i]; }
-    [[nodiscard]] constexpr T* data() { return &x; }
+    [[nodiscard]] constexpr const storage_t<T>& operator[](int i) const { return (&x)[i]; }
+    [[nodiscard]] constexpr storage_t<T>& operator[](int i) { return (&x)[i]; }
+    [[nodiscard]] constexpr storage_t<T>* data() { return &x; }
 
     // arithmetic
     [[nodiscard]] constexpr Vec4 operator-() const { return Vec4(-x, -y, -z, -w); }
@@ -365,14 +226,13 @@ struct Vec4
 template<typename T>
 struct Complex
 {
-    T x, y; // x = real, y = imag
+    storage_t<T> x, y; // x = real, y = imag
 
     // constructors
     Complex() = default;
     constexpr Complex(T v) : x{ v }, y{ v } {}
     constexpr Complex(T _x, T _y) : x{ _x }, y{ _y } {}
     constexpr Complex(const Vec2<T>& rhs) : x{ rhs.x }, y{ rhs.y } {}
-    constexpr Complex(const ImVec2 rhs) : x{ (T)rhs.x }, y{ (T)rhs.y } {}
 
     // convenience
     constexpr void set(T _x, T _y) { x = _x; y = _y; }
@@ -380,14 +240,13 @@ struct Complex
     [[nodiscard]] constexpr bool eq(T _x, T _y) const { return (x == _x && y == _y); }
 
     // conversions
-    [[nodiscard]] constexpr explicit operator ImVec2()                          const { return ImVec2((f32)x, (f32)y); }
     template<typename T2> [[nodiscard]] constexpr explicit operator Vec2<T2>()  const { return Vec2<T2>(x, y); }
     template<typename T2> [[nodiscard]] constexpr operator Complex<T2>()        const { return Complex<T2>{ (T2)x, (T2)y }; }
 
     // access
-    [[nodiscard]] constexpr const T& operator[](int i) const { return (&x)[i]; }
-    [[nodiscard]] constexpr T& operator[](int i) { return (&x)[i]; }
-    [[nodiscard]] constexpr T* data() { return &x; }
+    [[nodiscard]] constexpr const storage_t<T>& operator[](int i) const { return (&x)[i]; }
+    [[nodiscard]] constexpr storage_t<T>& operator[](int i) { return (&x)[i]; }
+    [[nodiscard]] constexpr storage_t<T>* data() { return &x; }
 
     // operator (complex arithmetic)
     [[nodiscard]] constexpr Complex operator-() const { return Complex(-x, -y); }
@@ -476,7 +335,7 @@ struct Matrix
     static constexpr int count = R * C;
 
     // column-major storage
-    std::array<T, (size_t)count> m{};
+    std::array<storage_t<T>, (size_t)count> m{};
 
     // constructors
     Matrix() = default;
@@ -519,15 +378,24 @@ struct Matrix
         return *this;
     }
 
+    template<typename U>
+    explicit constexpr operator Matrix<U, R, C>() const noexcept
+    {
+        Matrix<U, R, C> ret(T{ 0.0 });
+        for (int i = 0; i < count; ++i)
+            ret[(size_t)i] = static_cast<U>(m[(size_t)i]);
+        return ret;
+    }
+
     // access
-    [[nodiscard]] constexpr T& operator()(int r, int c) noexcept { return m[(size_t)(c * R + r)]; }
-    [[nodiscard]] constexpr const T& operator()(int r, int c) const noexcept { return m[(size_t)(c * R + r)]; }
+    [[nodiscard]] constexpr storage_t<T>& operator()(int r, int c) noexcept { return m[(size_t)(c * R + r)]; }
+    [[nodiscard]] constexpr const storage_t<T>& operator()(int r, int c) const noexcept { return m[(size_t)(c * R + r)]; }
 
-    [[nodiscard]] constexpr T& operator[](int i) noexcept { return m[(size_t)i]; }
-    [[nodiscard]] constexpr const T& operator[](int i) const noexcept { return m[(size_t)i]; }
+    [[nodiscard]] constexpr storage_t<T>& operator[](int i) noexcept { return m[(size_t)i]; }
+    [[nodiscard]] constexpr const storage_t<T>& operator[](int i) const noexcept { return m[(size_t)i]; }
 
-    [[nodiscard]] constexpr T* data() { return m.data(); }
-    [[nodiscard]] constexpr const T* data() const { return m.data(); }
+    [[nodiscard]] constexpr storage_t<T>* data() { return m.data(); }
+    [[nodiscard]] constexpr const storage_t<T>* data() const { return m.data(); }
 
     // convenience
     constexpr void setZero() { for (auto& e : m) e = T{}; }
@@ -609,7 +477,7 @@ struct Matrix
     }
 
 
-    // scalar ops with different type, e.g. f128 *= f64
+    // scalar ops with different type, e.g. fdd *= f64
     template<typename U>
     constexpr Matrix& operator+=(const Matrix<U, R, C>& rhs)
     {
@@ -715,17 +583,17 @@ struct Matrix
 
     [[nodiscard]] constexpr T determinant() const requires (R == 3 && C == 3)
     {
-        const T& a = (*this)(0, 0);
-        const T& b = (*this)(0, 1);
-        const T& c = (*this)(0, 2);
+        const storage_t<T>& a = (*this)(0, 0);
+        const storage_t<T>& b = (*this)(0, 1);
+        const storage_t<T>& c = (*this)(0, 2);
 
-        const T& d = (*this)(1, 0);
-        const T& e = (*this)(1, 1);
-        const T& f = (*this)(1, 2);
+        const storage_t<T>& d = (*this)(1, 0);
+        const storage_t<T>& e = (*this)(1, 1);
+        const storage_t<T>& f = (*this)(1, 2);
 
-        const T& g = (*this)(2, 0);
-        const T& h = (*this)(2, 1);
-        const T& i = (*this)(2, 2);
+        const storage_t<T>& g = (*this)(2, 0);
+        const storage_t<T>& h = (*this)(2, 1);
+        const storage_t<T>& i = (*this)(2, 2);
 
         return a * (e * i - f * h)
              - b * (d * i - f * g)
@@ -747,17 +615,17 @@ struct Matrix
 
     [[nodiscard]] constexpr Matrix inversed() const requires (R == 3 && C == 3)
     {
-        const T& a = (*this)(0,0);
-        const T& b = (*this)(0,1);
-        const T& c = (*this)(0,2);
+        const storage_t<T>& a = (*this)(0,0);
+        const storage_t<T>& b = (*this)(0,1);
+        const storage_t<T>& c = (*this)(0,2);
 
-        const T& d = (*this)(1,0);
-        const T& e = (*this)(1,1);
-        const T& f = (*this)(1,2);
+        const storage_t<T>& d = (*this)(1,0);
+        const storage_t<T>& e = (*this)(1,1);
+        const storage_t<T>& f = (*this)(1,2);
 
-        const T& g = (*this)(2,0);
-        const T& h = (*this)(2,1);
-        const T& i = (*this)(2,2);
+        const storage_t<T>& g = (*this)(2,0);
+        const storage_t<T>& h = (*this)(2,1);
+        const storage_t<T>& i = (*this)(2,2);
 
         Matrix inv;
 
@@ -834,7 +702,7 @@ template<typename T> using Mat4 = Matrix<T, 4, 4>;
 template<typename T>
 struct Range
 {
-    T lo, hi;
+    storage_t<T> lo, hi;
 
     static Range<T> mergeShrink(const std::vector<Range<T>>& ranges)
     {
@@ -1086,8 +954,8 @@ template<typename T> struct Quad; // forward declare for Rect->Quad conversion s
 template<typename T>
 struct Rect
 {
-    union { struct { T x1, y1; }; Vec2<T> a; };
-    union { struct { T x2, y2; }; Vec2<T> b; };
+    union { struct { storage_t<T> x1, y1; }; Vec2<T> a; };
+    union { struct { storage_t<T> x2, y2; }; Vec2<T> b; };
 
     Rect() : a(0, 0), b(0, 0) {}
     constexpr Rect(T _x1, T _y1, T _x2, T _y2) { set(_x1, _y1, _x2, _y2); }
@@ -1102,12 +970,14 @@ struct Rect
     constexpr void set(const Vec2<T>& A, const Vec2<T>& B) { a = A; b = B; }
     constexpr void set(T _x1, T _y1, T _x2, T _y2) { x1 = _x1; y1 = _y1; x2 = _x2; y2 = _y2; }
 
-    [[nodiscard]] constexpr f64  width() const { return x2 - x1; }
-    [[nodiscard]] constexpr f64  height() const { return y2 - y1; }
+    [[nodiscard]] constexpr T x() const { return x1; }
+    [[nodiscard]] constexpr T y() const { return y1; }
+    [[nodiscard]] constexpr T width() const { return x2 - x1; }
+    [[nodiscard]] constexpr T height() const { return y2 - y1; }
     [[nodiscard]] constexpr Vec2<T> size() const { return { x2 - x1, y2 - y1 }; }
 
-    [[nodiscard]] constexpr f64  cx() const { return (x1 + x2) / 2; }
-    [[nodiscard]] constexpr f64  cy() const { return (y1 + y2) / 2; }
+    [[nodiscard]] constexpr T cx() const { return (x1 + x2) / 2; }
+    [[nodiscard]] constexpr T cy() const { return (y1 + y2) / 2; }
     [[nodiscard]] constexpr Vec2<T> center() const { return { (x1 + x2) / 2, (y1 + y2) / 2 }; }
 
     [[nodiscard]] constexpr Vec2<T> tl() const { return { std::min(x1, x2), std::min(y1, y2) }; }
@@ -1164,9 +1034,9 @@ template<typename T> struct AngledRect;
 template<typename T>
 struct AngledRect
 {
-    union { struct { T cx, cy; }; Vec2<T> cen; };
-    union { struct { T w, h; }; Vec2<T> size; };
-    T angle;
+    union { struct { storage_t<T> cx, cy; }; Vec2<T> cen; };
+    union { struct { storage_t<T> w, h; }; Vec2<T> size; };
+    storage_t<T> angle;
 
     AngledRect() {}
     AngledRect(T _cx, T _cy, T _w, T _h, T _angle) : cx(_cx), cy(_cy), w(_w), h(_h), angle(_angle) {}
@@ -1248,7 +1118,7 @@ struct AngledRect
         cx = (a.cx + b.cx) * T{0.5};
         cy = (a.cy + b.cy) * T{0.5};
         angle = math::avgAngle<T>(a.angle, b.angle);
-        size = AngledRect<T>::enclosingSize(a, b, angle, fixed_aspect_ratio);
+        size = AngledRect<T>::enclosingSize<T>(a, b, angle, fixed_aspect_ratio);
     }
 };
 
@@ -1339,6 +1209,18 @@ struct Quad
         return Rect<T>(min_x, min_y, max_x, max_y);
     }
 
+    template<typename U>
+    [[nodiscard]] constexpr Quad<T> scaled(U scale) const
+    {
+        Vec2<T> cen = center();
+        return Quad<T>(
+            cen + (a - cen) * scale,
+            cen + (b - cen) * scale,
+            cen + (c - cen) * scale,
+            cen + (d - cen) * scale
+        );
+    }
+
     [[nodiscard]] static constexpr T cross(const Pt& u, const Pt& v) {
         return u.x * v.y - u.y * v.x;
     }
@@ -1381,10 +1263,10 @@ template<class X> struct is_vec2 : std::false_type {};
 template<class T> struct is_vec2<Vec2<T>> : std::true_type {};
 template<class X> inline constexpr bool is_vec2_v = is_vec2<std::remove_cvref_t<X>>::value;
 
-template<class T, class U> using plus_t  = decltype(std::declval<T>() + std::declval<U>());
-template<class T, class U> using minus_t = decltype(std::declval<T>() - std::declval<U>());
-template<class T, class U> using mul_t   = decltype(std::declval<T>() * std::declval<U>());
-template<class T, class U> using div_t   = decltype(std::declval<T>() / std::declval<U>());
+template<class T, class U> using plus_t  = value_t<decltype(std::declval<T>() + std::declval<U>())>;
+template<class T, class U> using minus_t = value_t<decltype(std::declval<T>() - std::declval<U>())>;
+template<class T, class U> using mul_t   = value_t<decltype(std::declval<T>() * std::declval<U>())>;
+template<class T, class U> using div_t   = value_t<decltype(std::declval<T>() / std::declval<U>())>;
 
 // Vec2 op scalar
 template<class T, class U> requires (!is_vec2_v<U>&& requires(T a, U b) { a + b; })
@@ -1466,11 +1348,6 @@ template<typename T> inline Vec4<T> operator-(const Vec4<T>& v, T s) { return v 
 template<class X> struct is_cplx : std::false_type {};
 template<class T> struct is_cplx<Complex<T>> : std::true_type {};
 template<class X> inline constexpr bool is_cplx_v = is_cplx<std::remove_cvref_t<X>>::value;
-
-template<class T, class U> using plus_t  = decltype(std::declval<T>() + std::declval<U>());
-template<class T, class U> using minus_t = decltype(std::declval<T>() - std::declval<U>());
-template<class T, class U> using mul_t   = decltype(std::declval<T>() * std::declval<U>());
-template<class T, class U> using div_t   = decltype(std::declval<T>() / std::declval<U>());
 
 // Complex op scalar (scalar treated as real)
 template<class T, class U> requires (!is_cplx_v<U>&& requires(T a, U b) { a + b; })
@@ -1568,9 +1445,9 @@ constexpr auto operator/(const Complex<T>& a, const Complex<U>& b) -> Complex<di
 
 /// ----- Matrix overloads -----
 
-template<class T, class U> using mat_mul_t    = decltype(std::declval<T>() * std::declval<U>() + std::declval<T>() * std::declval<U>());
-template<class T, class U> using scalar_mul_t = decltype(std::declval<T>() * std::declval<U>());
-template<class T, class U> using scalar_div_t = decltype(std::declval<T>() / std::declval<U>());
+template<class T, class U> using mat_mul_t    = value_t<decltype(std::declval<T>() * std::declval<U>() + std::declval<T>() * std::declval<U>())>;
+template<class T, class U> using scalar_mul_t = value_t<decltype(std::declval<T>() * std::declval<U>())>;
+template<class T, class U> using scalar_div_t = value_t<decltype(std::declval<T>() / std::declval<U>())>;
 
 // ================= typedefs =================
 
@@ -1580,54 +1457,68 @@ typedef Vec2<i16>          SVec2;
 typedef Vec2<int>          IVec2;
 typedef Vec2<f32>          FVec2;
 typedef Vec2<f64>          DVec2;
-typedef Vec2<f128>         DDVec2;
+typedef Vec2<fdd>         DDVec2;
+typedef Vec2<fqd>         QDVec2;
                               
 typedef Vec3<int>          IVec3;
 typedef Vec3<f32>          FVec3;
 typedef Vec3<f64>          DVec3;
-typedef Vec3<f128>         DDVec3;
+typedef Vec3<fdd>         DDVec3;
+typedef Vec3<fqd>         QDVec3;
                               
 typedef Vec4<int>          IVec4;
 typedef Vec4<f32>          FVec4;
 typedef Vec4<f64>          DVec4;
-typedef Vec4<f128>         DDVec4;
+typedef Vec4<fdd>         DDVec4;
+typedef Vec4<fqd>         QDVec4;
 
 typedef Mat2<f32>          FMat2;
 typedef Mat2<f64>          DMat2;
-typedef Mat2<f128>         DDMat2;
+typedef Mat2<fdd>         DDMat2;
+typedef Mat2<fqd>         QDMat2;
 
 typedef Mat3<f32>          FMat3;
 typedef Mat3<f64>          DMat3;
-typedef Mat3<f128>         DDMat3;
+typedef Mat3<fdd>         DDMat3;
+typedef Mat3<fqd>         QDMat3;
 
 typedef Mat4<f32>          FMat4;
 typedef Mat4<f64>          DMat4;
-typedef Mat4<f128>         DDMat4;
+typedef Mat4<fdd>         DDMat4;
+typedef Mat4<fqd>         QDMat4;
 
 typedef Range<int>         IRange;
 typedef Range<f32>         FRange;
 typedef Range<f64>         DRange;
-typedef Range<f128>        DDRange;
+typedef Range<fdd>        DDRange;
+typedef Range<fqd>        QDRange;
                               
 typedef Segment<int>       ISegment;
 typedef Segment<f32>       FSegment;
 typedef Segment<f64>       DSegment;
+typedef Segment<fdd>      DDSegment;
+typedef Segment<fqd>      QDSegment;
                               
 typedef Rect<int>          IRect;
 typedef Rect<f32>          FRect;
 typedef Rect<f64>          DRect;
-typedef Rect<f128>         DDRect;
+typedef Rect<fdd>         DDRect;
+typedef Rect<fqd>         QDRect;
                               
 typedef Quad<int>          IQuad;
 typedef Quad<f32>          FQuad;
 typedef Quad<f64>          DQuad;
-typedef Quad<f128>         DDQuad;
+typedef Quad<fdd>         DDQuad;
+typedef Quad<fqd>         QDQuad;
                               
 typedef Ray<f32>           FRay;
 typedef Ray<f64>           DRay;
+typedef Ray<fdd>          DDRay;
+typedef Ray<fqd>          QDRay;
                               
 typedef AngledRect<f64>    DAngledRect;
-typedef AngledRect<f128>   DDAngledRect;
+typedef AngledRect<fdd>   DDAngledRect;
+typedef AngledRect<fqd>   QDAngledRect;
 
 
 // ================= statitic layout tests =================
@@ -1642,11 +1533,13 @@ inline void _vec2_tests()
 }
 
 inline void _type_tests() {
-    static_assert(std::is_trivially_constructible_v<f128>, "f128 must be trivially constructible");
+    static_assert(std::is_trivially_constructible_v<fdd>, "fdd must be trivially constructible");
+    static_assert(std::is_trivially_constructible_v<fqd>, "fqd must be trivially constructible");
 
     _vec2_tests<f32>();
     _vec2_tests<f64>();
-    _vec2_tests<f128>();
+    _vec2_tests<fdd>();
+    _vec2_tests<fqd>();
 }
 
 struct VecTests
@@ -1756,6 +1649,46 @@ struct downgrade_from_list<T, type_list<Ts...>> {
 template<class T, class List>
 using downgrade_from_list_t = typename downgrade_from_list<T, List>::type;
 
+// type_index
+
+// type_index primary template
+template<class List, class T>
+struct type_index;
+
+// recursive helper
+template<class T, std::size_t I, class... Ts>
+struct type_index_impl;
+
+template<class T, std::size_t I, class U, class... Us>
+struct type_index_impl<T, I, U, Us...>
+    : std::conditional_t<
+    std::is_same_v<T, U>,
+    std::integral_constant<std::size_t, I>,
+    type_index_impl<T, I + 1, Us...>
+    >
+{
+};
+
+template<class T, std::size_t I, class U>
+struct type_index_impl<T, I, U>
+{
+    static_assert(std::is_same_v<T, U>, "type_index: type not found in type_list");
+    using type = std::integral_constant<std::size_t, I>;
+};
+
+// type_index specialization for type_list
+template<class... Ts, class T>
+struct type_index<type_list<Ts...>, T>
+    : type_index_impl<T, 0, Ts...>::type
+{
+};
+
+// optional convenience value
+template<class List, class T>
+inline constexpr std::size_t type_index_v = type_index<List, T>::value;
+
+
+
 // ================= rebinding class templates =================
 // Upgrade/downgrade the FIRST type parameter of a class-template instance.
 
@@ -1781,13 +1714,16 @@ using downgrade_template_t = typename downgrade_template<Instance, List>::type;
 
 // =================  ladders =================
 
-using float_types        = type_list<f32, f64, f128>;
+using float_types        = type_list<f32, f64, fdd, fqd>;
 using signed_int_types   = type_list<i8, i16, i32, i64>;
 using unsigned_int_types = type_list<u8, u16, u32, u64>;
 
 using vec2_types = type_list<FVec2, DVec2, DDVec2>;
-using vec3_types = type_list<FVec3, DVec3, DDVec3> ;
-using vec4_types = type_list<FVec4, DVec4, DDVec4> ;
+using vec3_types = type_list<FVec3, DVec3, DDVec3>;
+using vec4_types = type_list<FVec4, DVec4, DDVec4>;
+
+template<class T>
+inline constexpr FloatType float_index_v = (FloatType)type_index<float_types, value_t<T>>::value;
 
 // ================= float type comparisons =================
 
@@ -1795,13 +1731,13 @@ template<class A, class B>
 struct max_float {
 private:
     using list = float_types;
-    static constexpr std::size_t ia = index_of_v<A, f32, f64, f128>;
-    static constexpr std::size_t ib = index_of_v<B, f32, f64, f128>;
+    static constexpr std::size_t ia = index_of_v<A, f32, f64, fdd, fqd>;
+    static constexpr std::size_t ib = index_of_v<B, f32, f64, fdd, fqd>;
     static constexpr bool valid = (ia != type_npos) && (ib != type_npos);
 public:
     using type = std::conditional_t<
         valid,
-        typename nth_type<(ia > ib ? ia : ib), f32, f64, f128>::type,
+        typename nth_type<(ia > ib ? ia : ib), f32, f64, fdd, fqd>::type,
         void
     >;
 };
@@ -1812,13 +1748,13 @@ template<class A, class B>
 struct min_float {
 private:
     using list = float_types;
-    static constexpr std::size_t ia = index_of_v<A, f32, f64, f128>;
-    static constexpr std::size_t ib = index_of_v<B, f32, f64, f128>;
+    static constexpr std::size_t ia = index_of_v<A, f32, f64, fdd, fqd>;
+    static constexpr std::size_t ib = index_of_v<B, f32, f64, fdd, fqd>;
     static constexpr bool valid = (ia != type_npos) && (ib != type_npos);
 public:
     using type = std::conditional_t<
         valid,
-        typename nth_type<(ia < ib ? ia : ib), f32, f64, f128>::type,
+        typename nth_type<(ia < ib ? ia : ib), f32, f64, fdd, fqd>::type,
         void
         >;
 };
@@ -1941,8 +1877,6 @@ constexpr E& operator^=(E& a, I b) noexcept {
 }
 
 // -------- assignment ops: I op= E (integral LHS) --------
-// NOTE: This is the one that collides with built-in int|=int if you also keep some older template;
-// keep only this version.
 template<bitmask_enum E, class I>
     requires std::is_integral_v<I>
 constexpr I& operator|=(I& a, E b) noexcept {

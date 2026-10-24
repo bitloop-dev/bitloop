@@ -35,12 +35,16 @@
 #define FORCE_INLINE inline
 #endif
 
+#ifndef NO_INLINE
 #if defined(_MSC_VER)
-  #define NO_INLINE __declspec(noinline)
-#elif defined(__GNUC__) || defined(__clang__)
-  #define NO_INLINE __attribute__((noinline))
+#define NO_INLINE [[msvc::noinline]]
+#elif defined(__clang__)
+#define NO_INLINE [[clang::noinline]]
+#elif defined(__GNUC__)
+#define NO_INLINE __attribute__((noinline))
 #else
-  #define NO_INLINE
+#define NO_INLINE
+#endif
 #endif
 
 /// ======== Fast-math ========

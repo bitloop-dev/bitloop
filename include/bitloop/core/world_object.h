@@ -8,12 +8,12 @@ BL_BEGIN_NS
 template<typename T>
 class WorldObjectT
 {
-    CameraInfo* camera = nullptr;
+    WorldStageTransform world_stage;
 
-    DVec2   toStage(Vec2<T> p)                  const { return camera->getTransform().toStage<T>(p); }
-    DVec2   toStageOffset(const Vec2<T>& o)     const { return camera->getTransform().toStageOffset<T>(o); }
-    Vec2<T> toWorld(double sx, double sy)       const { return camera->getTransform().toWorld<T>(sx, sy); }
-    Vec2<T> toWorldOffset(double sx, double sy) const { return camera->getTransform().toWorldOffset<T>(sx, sy); }
+    DVec2   toStage(Vec2<T> p)                  const { return world_stage.toStage<T>(p); }
+    DVec2   toStageOffset(const Vec2<T>& o)     const { return world_stage.toStageOffset<T>(o); }
+    Vec2<T> toWorld(double sx, double sy)       const { return world_stage.toWorld<T>(sx, sy); }
+    Vec2<T> toWorldOffset(double sx, double sy) const { return world_stage.toWorldOffset<T>(sx, sy); }
 
     // local basis vectors after all transforms
     Vec2<T> u{ T{1}, T{0} };   // width direction
@@ -36,8 +36,8 @@ public:
     WorldObjectT() {}
     ~WorldObjectT() {}
 
-    void setCamera(const CameraInfo& cam) { camera = const_cast<CameraInfo*>(&cam); }
-    const CameraInfo* getCamera() const { return camera; }
+    void setWorldStageTransform(const WorldStageTransform& transform) { world_stage = transform; }
+    [[nodiscard]] const WorldStageTransform& worldStageTransform() const { return world_stage; }
 
     void setAlign(int ax, int ay) { align_x = ax; align_y = ay; }
     void setAlign(const DVec2& _align) { align = _align; }
@@ -59,7 +59,7 @@ public:
         return std::atan2(u_stage.y, u_stage.x);
     }
     [[nodiscard]] DQuad stageQuad() const {
-        return camera->getTransform().toStageQuad<T>(worldQuad());
+        return world_stage.toStageQuad<T>(worldQuad());
     }
 
     void setStagePos(double sx, double sy) { pos = toWorld(sx, sy); }
@@ -103,7 +103,7 @@ public:
 
         // Make sure uv vectors span 2D area
         T det = u.x * v.y - u.y * v.x;
-        if (det == 0) return  Vec2<T>{ T{ 0 }, T{ 0 } };
+        if (det == T{ 0.0 }) return  Vec2<T>{ T{ 0 }, T{ 0 } };
 
         // solve for a,b
         T inv_det = 1.0 / det;
@@ -130,8 +130,9 @@ public:
     }
 };
 
-typedef WorldObjectT<double> WorldObject;
-typedef WorldObjectT<f128> WorldObject128;
+typedef WorldObjectT<f64> WorldObject;
+typedef WorldObjectT<fdd> WorldObject128;
+typedef WorldObjectT<fqd> WorldObject256;
 
 
 BL_END_NS;

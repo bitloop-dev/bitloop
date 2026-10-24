@@ -1,13 +1,14 @@
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include <bitloop/core/threads.h>
 #include <bitloop/core/project.h>
-#include <bitloop/core/capture_manager.h>
-#include <bitloop/core/settings.h>
+#include <bitloop/core/capture_context.h>
 
 #include <bitloop/imguix/imguix.h>
+#include <bitloop/core/settings.h>
 #include <bitloop/nanovgx/nano_canvas.h>
 #include <bitloop/util/thread_queue.h>
 #include <bitloop/util/timer.h>
@@ -37,17 +38,7 @@ enum struct MainWindowCommandType
     ON_STOPPED_PROJECT,
     ON_PAUSED_PROJECT,
 
-    BEGIN_SNAPSHOT_PRESET_LIST,
-    BEGIN_SNAPSHOT_ACTIVE_PRESET,
-    BEGIN_RECORDING,
-    END_RECORDING
-};
-
-struct SnapshotPresetsArgs
-{
-    std::string rel_path_fmt; // path format (relative to project capture dir, no extension)
-    SnapshotPresetList presets; // which presets to target
-    int request_id;
+    BEGIN_SNAPSHOT_ACTIVE_PRESET
 };
 
 struct MainWindowCommandEvent
@@ -92,6 +83,17 @@ class MainWindow
     ImVec2               client_size{};
     bool                 viewport_hovered = false;
 
+    struct TimelineFrame {};
+    struct TimelineLayer
+    {
+        std::string name;
+        std::vector<TimelineFrame> frames;
+    };
+
+    std::vector<TimelineLayer> timelineLayers{ { "Layer 1", {} } };
+    ImS64 timelineScrollFrame = 0;
+    std::int64_t timelinePreviousFrame = -1;
+
     // toolbar
     ToolbarButtonState   play     = { ImVec4(0.3f, 0.3f, 0.3f, 1.0f), ImVec4(0.1f, 0.6f, 0.1f, 1.0f), ImVec4(0.4f, 1.0f, 0.4f, 1.0f), true };
     ToolbarButtonState   pause    = { ImVec4(0.3f, 0.3f, 0.3f, 1.0f), ImVec4(0.3f, 0.3f, 0.3f, 1.0f), ImVec4(1.0f, 1.0f, 1.0f, 1.0f), false };
@@ -101,43 +103,12 @@ class MainWindow
                          
 
     // settings/config
+    CaptureContext&      capture_context;
     SettingsPanel        settings_panel;
     CaptureConfig        config;
 
-    // capturing
-    CaptureManager       capture_manager;
-
-    SnapshotPresetList   enabled_capture_presets; // capture preset list (once we start capturing, this remains unchanged until we finish)
-    int                  enabled_capture_presets_current_idx = 0; // index of active preset in enabled_capture_presets (NOT index in allPresets)
-                         
-    bool                 is_snapshotting_list = false; // remains true while processing whole batch (enabled_capture_presets)
-    int                  active_snapshot_preset_request_id = 0;
-    std::string          active_capture_rel_path_fmt;
-    int                  shared_batch_fileindex = 0; // dir scanned for next highest index, used for batch
-                         
-    ///bool              window_capture = false;
-    bool                 new_frame_prepared = false; // set by worker thread when it's had a chance to react to the new capture options (dimensions, ssaa, etc)
-    bool                 permit_frame_capture = false;
-    bool                 captured_last_frame = false;
-
-    // active rendered preset (render/capture)
-    // Keep track of old values to detect changes to canvas
-    const CapturePreset* active_preset = nullptr;
-    int                  active_ssaa        = 1;
-    float                active_sharpen     = 0.0f;
-    IVec2                active_canvas_size{};
-    IVec2                active_target_size{};
-                         
-    bool                 changed_size = true;
-    bool                 changed_scale = true;
-    bool                 changed_sharpening = false;
-    float                old_sharpen = 0.0f; // needed to determine if we need to re-run preprocessor pipeline on change
-
     // render/capture pipeline components
     NanoCanvas           canvas;
-    CapturePreprocessor  preprocessor;
-    EncodeFrame          preprocessed_frame; // intermediate buffer for preprocessor output (rescaled, sharpened, etc before encoding)
-    bool                 use_preprocessor_texture = false;
 
     // thread communication
     SharedSync&          shared_sync;
@@ -154,15 +125,18 @@ class MainWindow
     // updates 'active_' preset values to start using next frame
     bool updateActivePreset();
 
+    void handleCaptureCommand(CaptureCommandEvent e);
+
 public:
 
     static constexpr MainWindow* instance() { 
         return singleton; 
     }
 
-    MainWindow(SharedSync& _shared_sync) :
-        shared_sync(_shared_sync),
-        settings_panel(this)
+    MainWindow(SharedSync& _shared_sync, CaptureContext& _capture_context) :
+        capture_context(_capture_context),
+        settings_panel(this, capture_context.settings()),
+        shared_sync(_shared_sync)
     {
         singleton = this;
     }
@@ -170,20 +144,8 @@ public:
 
     [[nodiscard]] NanoCanvas*                  getCanvas() { return &canvas; }
     [[nodiscard]] const NanoCanvas*            getCanvas() const { return &canvas; }
-    [[nodiscard]] CaptureManager*              getCaptureManager() { return &capture_manager; }
-    [[nodiscard]] SettingsConfig*              getSettingsConfig() { return &settings_panel.getConfig(); }
-    [[nodiscard]] const SettingsConfig*        getSettingsConfig() const { return &settings_panel.getConfig(); }
-    [[nodiscard]] SnapshotPresetManager*       getSnapshotPresetManager() { return &settings_panel.getConfig().snapshot_preset_manager; }
-    [[nodiscard]] const SnapshotPresetManager* getSnapshotPresetManager() const { return &settings_panel.getConfig().snapshot_preset_manager; }
-
-    [[nodiscard]] bool isSnapshotting() const
-    {
-        return is_snapshotting_list;
-    }
-
-    int getFPS() const { return getSettingsConfig()->record_fps; }
-    void setFixedFrameTimeDelta(bool b) { getSettingsConfig()->fixed_time_delta = b; }
-    bool isFixedFrameTimeDelta() const { return getSettingsConfig()->fixed_time_delta; }
+    [[nodiscard]] CaptureContext&              captureContext() { return capture_context; }
+    [[nodiscard]] const CaptureContext&        captureContext() const { return capture_context; }
 
     void queueBeginSnapshot(
         const SnapshotPresetList& presets,
@@ -224,11 +186,6 @@ public:
     void endRecording();
     void checkCaptureComplete();
 
-    void captureFrame(bool b) { permit_frame_capture = b; }
-    bool capturingNextFrame() const { return permit_frame_capture; }
-    bool capturedLastFrame() const { return captured_last_frame; }
-    int  capturedFrameCount() const { return capture_manager.frameCount(); }
-
     bool isEditingUI();
 
     void init();
@@ -243,7 +200,7 @@ public:
 
     //ImRect viewportRect() { return viewport_rect; }
     bool viewportHovered() const { return viewport_hovered; }
-    IVec2 viewportSize() const { return (IVec2)client_size; }
+    IVec2 viewportSize() const { return IVec2((int)client_size.x, (int)client_size.y); }
 
     void setSidebarVisible(bool b) { sidebar_visible = b; }
     bool getSidebarVisible() { return sidebar_visible; }
@@ -280,6 +237,7 @@ public:
     bool focusWindow(const char* id);
 
     void populateCollapsedLayout();
+    void populateTimeline(std::int64_t currentFrame, bool playing);
     void populateViewport(bool& projectDrawn);
     
     void populateExpandedLayout();

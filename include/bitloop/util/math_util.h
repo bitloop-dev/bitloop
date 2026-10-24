@@ -4,11 +4,11 @@
 #include <iomanip>
 #include <algorithm>
 
-// todo: Make types a util, or only import f128.h (and f64, etc)
+// todo: Make types a util, or only import fdd.h (and f64, etc)
 #include <bitloop/core/types.h>
 
 //#define SIMD_FORCE_SCALER
-#include "simd.h"
+//#include <bitloop/util/fltx/simd.h>
 
 BL_BEGIN_NS
 
@@ -17,7 +17,8 @@ namespace math
     // Numbers
 
     template<class T> inline constexpr T pi_v = std::numbers::pi_v<T>;
-    template<> inline constexpr f128 pi_v<f128> = f128(3.141592653589793116, 1.2246467991473532072e-16);
+    template<> inline constexpr fdd pi_v<fdd> = fdd(3.141592653589793116, 1.2246467991473532072e-16);
+    template<> inline constexpr fqd pi_v<fqd> = fqd{ 0x1.921fb54442d18p+1,  0x1.1a62633145c07p-53, -0x1.f1976b7ed8fbcp-109,  0x1.4cf98e804177dp-163 };
 
     inline constexpr float  pi_f       = (float)std::numbers::pi;
     inline constexpr float  tau_f      = (float)std::numbers::pi * 2.0f;
@@ -33,13 +34,39 @@ namespace math
 
     // Functions
 
-    template<typename T> [[nodiscard]] inline T roundDown(T v, T step) { return floor(v / step) * step; }
-    template<typename T> [[nodiscard]] inline T roundUp(T v, T step) { return ceil(v / step) * step; }
-    template<typename T> [[nodiscard]] inline bool divisible(T _big, T _small)
+    template<std::integral T>
+    [[nodiscard]] inline T roundDown(T v, T step) noexcept
+    {
+        return (v / step) * step;
+    }
+
+    template<std::integral T>
+    [[nodiscard]] inline T roundUp(T v, T step) noexcept
+    {
+        return ((v + step - 1) / step) * step;
+    }
+
+    template<std::floating_point T>
+    [[nodiscard]] inline T roundDown(T v, T step) noexcept
+    {
+        return std::floor(v / step) * step;
+    }
+
+    template<std::floating_point T>
+    [[nodiscard]] inline T roundUp(T v, T step) noexcept
+    {
+        return std::ceil(v / step) * step;
+    }
+
+    template<typename T> [[nodiscard]] inline bool divisible(T _big, T _small, f64 tol_pct=0.0001)
     {
         static_assert(bl::is_arithmetic_v<T>, "divisible() only supports arithmetic types");
-        if constexpr (bl::is_floating_point_v<T>)
-            return abs(fmod(_big, _small)) <= abs(_small) * (std::numeric_limits<T>::epsilon() * 10);
+        if constexpr (bl::is_fltx_float_v<T> || std::is_floating_point_v<T>) // todo: was is_floating_point_v. Bring back for convenience?
+        {
+            T d = abs(fmod(_big, _small) - abs(_small));
+            T t = abs(_small) * tol_pct;
+            return d <= t;
+        }
         else if constexpr (bl::is_integral_v<T>)
             return _small != 0 && (_big % _small == 0);
         return false;
@@ -78,7 +105,7 @@ namespace math
     template <typename T>
     [[nodiscard]] int countWholeDigits(T x)
     {
-        static_assert(bl::is_floating_point_v<T>, "Float must be a floating-point type");
+        static_assert(bl::is_fltx_float_v<T> || std::is_floating_point_v<T>, "Float must be a floating-point type");
         if (!bl::isfinite(x)) return 0;
         x = abs(x);
         if (x < T{ 1 }) return 1;
@@ -233,8 +260,22 @@ namespace math
         if (diff < T{0}) diff += pi_v<T>*T{2};
         return diff - pi_v<T>;
     }
-    template<typename T> [[nodiscard]] inline T wrapRadians(T a) noexcept { return remainder(a, pi_v<T>*2); }
-    template<typename T> [[nodiscard]] inline T wrapRadians2PI(T a) noexcept { return a - pi_v<T>*2 * floor(a * T{1}/(pi_v<T>*2)); }
+
+    template<typename T>
+    [[nodiscard]] inline T wrapRadians2PI(T a) noexcept
+    {
+        const T two_pi = pi_v<T> *T{ 2 };
+        return a - two_pi * floor(a / two_pi);
+    }
+
+    template<typename T>
+    [[nodiscard]] inline T wrapRadians(T a) noexcept
+    {
+        const T pi = pi_v<T>;
+        const T two_pi = pi * T{ 2 };
+        return a - two_pi * floor((a + pi) / two_pi);
+    }
+
     template<typename T, typename S> [[nodiscard]] inline T lerpAngle(T a, T b, S f) { return wrapRadians(a + T{f}*closestAngleDifference(a, b)); }
     template<typename T> [[nodiscard]] inline T avgAngle(T a, T b) { return lerpAngle(a, b, T{ 0.5 }); }
     template<typename T> constexpr T avgAngle(const std::vector<T>& angles)

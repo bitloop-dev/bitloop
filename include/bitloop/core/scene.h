@@ -2,15 +2,21 @@
 
 #include <random>
 #include <chrono>
+#include <string>
 
-#include <bitloop/platform/platform.h>
 #include <bitloop/core/interface_model.h>
-#include <bitloop/core/capture_manager.h>
+
 #include <bitloop/core/snapshot_presets.h>
 #include <bitloop/util/math_util.h>
 #include <bitloop/util/change_tracker.h>
 #include <bitloop/util/timer.h>
-#include <bitloop/nanovgx/nano_canvas.h>
+#include <bitloop/util/thread_queue.h>
+
+#ifdef BITLOOP_DEV_MODE
+    #include <bitloop/core/sim_checkpoint.h>
+    #include <bitloop/core/sim_snapshot.h>
+    #include <bitloop/core/sim_trace.h>
+#endif
 
 #include "types.h"
 #include "event.h"
@@ -23,16 +29,43 @@ BL_BEGIN_NS
 
 class Viewport;
 class ProjectBase;
-class Layout;
+
+class CaptureContext;
+class CaptureManager;
+struct SettingsConfig;
 
 class SceneBase : public ChangeTracker
 {
     friend class ProjectBase;
+    friend class Viewport;
+
+private:
+
+    ProjectBase* project = nullptr;
 
     mutable std::mt19937 gen;
-
     double dt_sceneProcess = 0;
     SimpleTimer running_time;
+
+    bool needs_redraw = false;
+
+public:
+
+    [[nodiscard]] ProjectBase& getProject() noexcept
+    {
+        return *project;
+    }
+
+    [[nodiscard]] const ProjectBase& getProject() const noexcept
+    {
+        return *project;
+    }
+
+    template<typename T>
+    T& getProject() const
+    {
+        return static_cast<T&>(*project);
+    }
     
     // mutable so we return true the moment we begin capturing,
     // even if CaptureManager hasn't registered it yet.
@@ -42,19 +75,12 @@ class SceneBase : public ChangeTracker
     int capture_request_id = 1; // 0 reserved for "no callback"
     std::vector<std::pair<int, SnapshotBatchCallbacks>> snapshot_callbacks;
 
-    bool needs_redraw = false;
 
     virtual void _initGUI() {}
     virtual void _destroyGUI() {}
 
-//protected:
-
-    friend class Viewport;
-    friend class ProjectBase;
-
-    ProjectBase* project = nullptr;
-
-    int scene_index = -1;
+    int scene_declaration_index = -1;
+    std::string scene_id;
     std::vector<Viewport*> mounted_to_viewports;
 
     bool started = false;
@@ -71,8 +97,10 @@ class SceneBase : public ChangeTracker
     {
         if (!destroyed && started)
         {
+            sceneStop();
             sceneDestroy();
             destroyed = true;
+            started = false;
         }
     }
 
@@ -109,25 +137,21 @@ class SceneBase : public ChangeTracker
         {
             switch (e.type())
             {
-            case SDL_EVENT_FINGER_DOWN:       onPointerDown(PointerEvent(e));  break;
-            case SDL_EVENT_MOUSE_BUTTON_DOWN: onPointerDown(PointerEvent(e));  break;
-            case SDL_EVENT_FINGER_UP:         onPointerUp(PointerEvent(e));    break;
-            case SDL_EVENT_MOUSE_BUTTON_UP:   onPointerUp(PointerEvent(e));    break;
-            case SDL_EVENT_FINGER_MOTION:     onPointerMove(PointerEvent(e));  break;
-            case SDL_EVENT_MOUSE_MOTION:      onPointerMove(PointerEvent(e));  break;
-            case SDL_EVENT_MOUSE_WHEEL:       onWheel(PointerEvent(e));        break;
+            case EventType::FINGER_DOWN:       onPointerDown(PointerEvent(e));  break;
+            case EventType::MOUSE_BUTTON_DOWN: onPointerDown(PointerEvent(e));  break;
+            case EventType::FINGER_UP:         onPointerUp(PointerEvent(e));    break;
+            case EventType::MOUSE_BUTTON_UP:   onPointerUp(PointerEvent(e));    break;
+            case EventType::FINGER_MOTION:     onPointerMove(PointerEvent(e));  break;
+            case EventType::MOUSE_MOTION:      onPointerMove(PointerEvent(e));  break;
+            case EventType::MOUSE_WHEEL:       onWheel(PointerEvent(e));        break;
 
-            case SDL_EVENT_KEY_DOWN:          onKeyDown(KeyEvent(e));          break;
-            case SDL_EVENT_KEY_UP:            onKeyUp(KeyEvent(e));            break;
+            case EventType::KEY_DOWN:          onKeyDown(KeyEvent(e));          break;
+            case EventType::KEY_UP:            onKeyUp(KeyEvent(e));            break;
             }
         }
     }
 
 public:
-
-    // config kept alive for at least as long as this Scene holds the shared_ptr to the launch config
-    // see:  ProjectBase::create(typename SceneType::Config config)
-    std::shared_ptr<void> active_config;
 
     // todo: Give each viewport it's own mouse, don't spill position between viewports
     MouseInfo* mouse = nullptr;
@@ -142,21 +166,25 @@ public:
 
     virtual InterfaceModel* getInterfaceModel() = 0;
 
-    void mountTo(Viewport* viewport);
-    void mountTo(Layout& viewports);
-    void mountToAll(Layout& viewports);
-
     void requestRedraw(bool b) { needs_redraw = b; }
     void requestImmediateUpdate();
 
     virtual void sceneStart() {}
     virtual void sceneMounted(Viewport*) {}
+    virtual void sceneUnmounted(Viewport*) {}
     virtual void sceneStop() {}
     virtual void sceneDestroy() {}
-    virtual void sceneProcess() {}
+    virtual void sceneProcess(double) {}
     virtual void viewportProcess(Viewport*, double) {}
     virtual void viewportDraw(Viewport*) const = 0;
     virtual void onEndFrame() {}
+
+#ifdef BITLOOP_DEV_MODE
+    virtual void traceFrame(SimTraceFrame&) const {}
+    virtual bool captureTraceSnapshot(std::string_view, SimSnapshotImage&) const { return false; }
+    virtual bool saveCheckpoint(SimCheckpointWriter&) const { return false; }
+    virtual bool loadCheckpoint(const SimCheckpointReader&) { return false; }
+#endif
 
     virtual void onEvent(Event) {}
 
@@ -169,7 +197,9 @@ public:
     virtual void onKeyUp(KeyEvent) {}
 
     virtual std::string name() const { return "Scene"; }
-    [[nodiscard]] int sceneIndex() const { return scene_index; }
+    [[nodiscard]] const std::string& id() const { return scene_id; }
+    [[nodiscard]] int sceneDeclarationIndex() const { return scene_declaration_index; }
+    [[nodiscard]] int activeSceneIndex() const noexcept;
     [[nodiscard]] const std::vector<Viewport*>& mountedToViewports() const {
         return mounted_to_viewports;
     }
@@ -188,7 +218,25 @@ public:
     [[nodiscard]] bool capturedLastFrame() const;
     [[nodiscard]] int  capturedFrameCount() const;
 
+    [[nodiscard]] CaptureContext& captureContext();
+    [[nodiscard]] const CaptureContext& captureContext() const;
+    [[nodiscard]] SettingsConfig& captureSettings();
+    [[nodiscard]] const SettingsConfig& captureSettings() const;
+    [[nodiscard]] SnapshotPresetManager& snapshotPresetManager();
+    [[nodiscard]] const SnapshotPresetManager& snapshotPresetManager() const;
+    [[nodiscard]] bool isHeadless() const;
+    [[nodiscard]] ThreadQueue& renderThreadQueue();
+
     void permitCaptureFrame(bool b);
+#ifdef BITLOOP_DEV_MODE
+    void traceSnapshot(std::string route, std::string reason = {}) const;
+    void traceCanvas(std::string id, std::string reason = {}) const;
+    void traceCanvas(std::string id, IRect pixel_rect, std::string reason = {}) const;
+    void traceCanvasWorld(std::string id, DRect world_rect, std::string reason = {}) const;
+    void traceCanvas(const Viewport& viewport, std::string id, std::string reason = {}) const;
+    void traceCanvas(const Viewport& viewport, std::string id, IRect pixel_rect, std::string reason = {}) const;
+    void traceCanvasWorld(const Viewport& viewport, std::string id, DRect world_rect, std::string reason = {}) const;
+#endif
 
     virtual void onBeginSnapshot() {}
     virtual void onEncodeFrame(EncodeFrame& data [[maybe_unused]], const CapturePreset& preset [[maybe_unused]]) {}
@@ -222,6 +270,8 @@ public:
 
 class BasicScene : public SceneBase, public DirectInterfaceModel
 {
+    // no BufferedInterfaceModel* ui, all data is on single thread (todo: test)
+
     void _sceneAttributes() override final
     {
         sidebar();
@@ -273,7 +323,8 @@ protected:
 
     void _initGUI() override final
     {
-        if (!ui) {
+        if (!ui)
+        {
             // safer to initialize UI on same thread as UI populate
             ui = new SceneType::UI(static_cast<const SceneType*>(this));
             ui->init();

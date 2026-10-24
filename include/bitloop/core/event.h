@@ -1,9 +1,9 @@
 #pragma once
-#include <SDL3/SDL.h>
 #include <string>
+#include <utility>
 
-#define BL_BEGIN_NS namespace bl {
-#define BL_END_NS   }
+#include <bitloop/core/event_data.h>
+#include <bitloop/core/types.h>
 
 BL_BEGIN_NS
 
@@ -17,7 +17,6 @@ class PointerEvent;
 class Event
 {
     friend class ProjectBase;
-    friend class CameraInfo;
 
     friend class PointerEvent;
     friend class KeyEvent;
@@ -26,28 +25,30 @@ protected:
     Viewport* _focused_ctx = nullptr;
     Viewport* _hovered_ctx = nullptr;
     Viewport* _owner_ctx = nullptr;
+    IVec2 _pointer_surface_size{ 0, 0 };
 
-    SDL_Event& sdl_event;
+    EventData event_data;
 
     void setFocusedViewport(Viewport* ctx) { _focused_ctx = ctx; }
     void setHoveredViewport(Viewport* ctx) { _hovered_ctx = ctx; }
     void setOwnerViewport(Viewport* ctx)   { _owner_ctx = ctx; }
+    void setPointerSurfaceSize(IVec2 size) { _pointer_surface_size = size; }
 
 public:
 
     // Pointer = mouse/touch
     [[nodiscard]] bool isPointerEvent() const
     {
-        switch (sdl_event.type)
+        switch (event_data.type)
         {
-        case SDL_EVENT_FINGER_DOWN:
-        case SDL_EVENT_FINGER_UP:
-        case SDL_EVENT_FINGER_MOTION:
+        case EventType::FINGER_DOWN:
+        case EventType::FINGER_UP:
+        case EventType::FINGER_MOTION:
 
-        case SDL_EVENT_MOUSE_BUTTON_DOWN:
-        case SDL_EVENT_MOUSE_BUTTON_UP:
-        case SDL_EVENT_MOUSE_MOTION:
-        case SDL_EVENT_MOUSE_WHEEL:
+        case EventType::MOUSE_BUTTON_DOWN:
+        case EventType::MOUSE_BUTTON_UP:
+        case EventType::MOUSE_MOTION:
+        case EventType::MOUSE_WHEEL:
             return true;
         }
         return false;
@@ -55,11 +56,11 @@ public:
 
     [[nodiscard]] bool isFingerEvent() const
     {
-        switch (sdl_event.type)
+        switch (event_data.type)
         {
-        case SDL_EVENT_FINGER_DOWN:
-        case SDL_EVENT_FINGER_UP:
-        case SDL_EVENT_FINGER_MOTION:
+        case EventType::FINGER_DOWN:
+        case EventType::FINGER_UP:
+        case EventType::FINGER_MOTION:
             return true;
         }
         return false;
@@ -67,23 +68,24 @@ public:
 
     [[nodiscard]] bool isPressEvent() const
     {
-        switch (sdl_event.type)
+        switch (event_data.type)
         {
-        case SDL_EVENT_FINGER_DOWN:
-        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case EventType::FINGER_DOWN:
+        case EventType::MOUSE_BUTTON_DOWN:
             return true;
         }
         return false;
     }
 
-    Event(SDL_Event& e) : sdl_event(e) {}
+    Event(EventData data) : event_data(std::move(data)) {}
     Event(const Event& e) = default;
 
-    [[nodiscard]] auto type() const             { return sdl_event.type; }
+    [[nodiscard]] auto type() const             { return event_data.type; }
     [[nodiscard]] Viewport* ctx_focused() const { return _focused_ctx; }
     [[nodiscard]] Viewport* ctx_hovered() const { return _hovered_ctx; }
     [[nodiscard]] Viewport* ctx_owner()   const { return _owner_ctx; }
-    [[nodiscard]] SDL_Event* sdl()        const { return &sdl_event; }
+    [[nodiscard]] IVec2 pointerSurfaceSize() const { return _pointer_surface_size; }
+    [[nodiscard]] const EventData& data() const { return event_data; }
     [[nodiscard]] std::string toString();
 
     bool ownedBy(const SceneBase* scene);
@@ -95,31 +97,28 @@ public:
     PointerEvent(const Event& e) : Event(e) {}
 
     // Mouse
-    [[nodiscard]] Uint8 button() { return sdl_event.button.button; }
-    [[nodiscard]] double wheelY() { return (double)sdl_event.wheel.y; }
+    [[nodiscard]] std::uint8_t button() { return event_data.button.button; }
+    [[nodiscard]] double wheelY() { return (double)event_data.wheel.y; }
 
     // Touch
-    [[nodiscard]] constexpr SDL_FingerID fingerID() { return sdl_event.tfinger.fingerID; }
+    [[nodiscard]] constexpr std::uint64_t fingerID() { return event_data.tfinger.fingerID; }
     [[nodiscard]] double x();
     [[nodiscard]] double y();
+    [[nodiscard]] DVec2 worldPosition(const CameraInfo& camera);
 
     [[nodiscard]] bool hoveredOver(const SceneBase* scene);
 };
 
-typedef SDL_Keycode KeyCode;
-typedef SDL_Keymod KeyMod;
-typedef SDL_Scancode ScanCode;
-
 class KeyEvent : public Event
 {
 public:
-    KeyEvent(const Event& e) : Event(e.sdl_event) {}
+    KeyEvent(const Event& e) : Event(e) {}
 
-    [[nodiscard]] KeyCode keyCode()     { return static_cast<KeyCode>(sdl_event.key.key); }
-    [[nodiscard]] ScanCode scanCode()   { return static_cast<ScanCode>(sdl_event.key.scancode); }
-    [[nodiscard]] SDL_Keymod keyMod()   { return static_cast<KeyMod>(sdl_event.key.mod); }
+    [[nodiscard]] KeyCode keyCode()   { return event_data.key.key; }
+    [[nodiscard]] ScanCode scanCode() { return event_data.key.scancode; }
+    [[nodiscard]] KeyMod keyMod()     { return event_data.key.mod; }
 
-    [[nodiscard]] const char* keyName() { return SDL_GetKeyName(keyCode()); }
+    [[nodiscard]] const char* keyName() { return event_data.key.name.c_str(); }
 };
 
 BL_END_NS

@@ -73,6 +73,8 @@ enum struct BlendFactor
     SRC_ALPHA_SATURATE    = NVGblendFactor::NVG_SRC_ALPHA_SATURATE
 };
 
+typedef NVGpaint PaintStyle;
+
 struct CompositeScope
 {
     NVGcontext* vg;
@@ -161,7 +163,7 @@ public:
         paint_ctx = target;
         vg = target->vg;
 
-        // Necessary? Project should be resetting them each frame anyway
+        // Necessary? Project should be resetting size each frame anyway
         ///setFontSize(target->font_size);
     }
 
@@ -181,7 +183,14 @@ public:
     void save() const { nvgSave(vg); }
     void restore() { nvgRestore(vg); }
     
-    void resetTransform()                         { nvgResetTransform(vg); }
+    void resetTransform()
+    {
+        nvgResetTransform(vg);
+    }
+    void transform(float a, float b, float c, float d, float e, float f)
+    {
+        nvgTransform(vg, a, b, c, d, e, f);
+    }
     void transform(const FMat3& m)
     {
         const f32 a = m(0, 0);
@@ -193,6 +202,7 @@ public:
 
         nvgTransform(vg, a, b, c, d, e, f);
     }
+
     FMat3 currentTransform() const
     {
         f32 x[6];
@@ -223,8 +233,10 @@ public:
     void setFillStyle(const f32(&color)[3])                { nvgFillColor(vg, {color[0], color[1], color[2], 1.0f}); }
     void setFillStyle(const f32(&color)[4])                { nvgFillColor(vg, {color[0], color[1], color[2], color[3]}); }
     void setFillStyle(int r, int g, int b, int a = 255)    { nvgFillColor(vg, nvgRGBA(r, g, b, a)); }
+    void setFillStyle(NVGpaint paint)                      { nvgFillPaint(vg, paint); }
                                                            
     void setStrokeStyle(const Color& color)                { nvgStrokeColor(vg, nvgRGBA(color.r, color.g, color.b, color.a)); }
+    void setStrokeStyle(const Color& color, int a)         { nvgStrokeColor(vg, nvgRGBA(color.r, color.g, color.b, a)); }
     void setStrokeStyle(const f32(&color)[3])              { nvgStrokeColor(vg, {color[0], color[1], color[2], 1.0f}); }
     void setStrokeStyle(const f32(&color)[4])              { nvgStrokeColor(vg, {color[0], color[1], color[2], color[3]}); }
     void setStrokeStyle(int r, int g, int b, int a = 255)  { nvgStrokeColor(vg, nvgRGBA(r, g, b, a)); }
@@ -233,6 +245,12 @@ public:
     void setLineCap(LineCap cap)                           { nvgLineCap(vg, (int)cap); }
     void setLineJoin(LineJoin join)                        { nvgLineJoin(vg, (int)join); }
     void setMiterLimit(f64 limit)                          { nvgMiterLimit(vg, (f32)limit); }
+
+    // ======== patterns ========
+    PaintStyle imagePattern(f32 ox, f32 oy, f32 ex, f32 ey, f32 angle, int image, f32 alpha)
+    {
+        return nvgImagePattern(vg, ox, oy, ex, ey, angle, image, alpha);
+    }
 
     // ======== composite ========
 
@@ -420,6 +438,8 @@ public:
 
     void circle(f64 cx, f64 cy, f64 r) { nvgCircle(vg, (f32)(cx), (f32)(cy), (f32)(r)); }
     void circle(DVec2 p, f64 r) { nvgCircle(vg, (f32)(p.x), (f32)(p.y), (f32)(r)); }
+    void rect(f64 x, f64 y, f64 w, f64 h) { nvgRect(vg, (f32)x, (f32)y, (f32)w, (f32)h); }
+    void rect(DVec2 pos, DVec2 size) { nvgRect(vg, (f32)pos.x, (f32)pos.y, (f32)size.x, (f32)size.y); }
     void ellipse(f64 cx, f64 cy, f64 rx, f64 ry) { nvgEllipse(vg, (f32)(cx), (f32)(cy), (f32)(rx), (f32)(ry)); }
     void ellipse(DVec2 cen, DVec2 size) { nvgEllipse(vg, (f32)(cen.x), (f32)(cen.y), (f32)(size.x), (f32)(size.y)); }
     void fillRect(f64 x, f64 y, f64 w, f64 h) { nvgBeginPath(vg); nvgRect(vg, (f32)(x), (f32)(y), (f32)(w), (f32)(h)); nvgFill(vg); }
@@ -533,7 +553,10 @@ public:
         DVec2 start_size = { start_w, start_h };
         DVec2 new_size = { w, h };
 
-        scale_adjust = std::min(new_size.x / start_size.x, new_size.y / start_size.y);
+        if (start_size.x > 0.0 && start_size.y > 0.0)
+            scale_adjust = std::min(new_size.x / start_size.x, new_size.y / start_size.y);
+        else
+            scale_adjust = 1.0;
     }
 
     void setClientRect(f64 _x, f64 _y, f64 _w, f64 _h)
@@ -572,7 +595,7 @@ public:
 
 class Painter : private SimplePainter
 {
-    friend class CameraInfo;
+    //friend class CameraInfo;
     friend class Viewport;
 
     DVec2 align_full(DVec2 p)         { return DVec2{ std::floor(p.x),       std::floor(p.y) };       }
@@ -668,8 +691,9 @@ public:
     }
 
     [[nodiscard]] WorldStageTransform worldStageTransform() const { return m; }
-    template<typename T = f128> [[nodiscard]] const Mat3<T>& currentTransform() const { return m.stageTransform<T>(); }
-    template<typename T = f128> [[nodiscard]] const Mat3<T>& inverseTransform() const { return m.worldTransform<T>(); }
+    [[nodiscard]] WorldStageTransform cameraTransform(const CameraInfo& camera) const { return camera.transformFor(*surface); }
+    template<typename T> [[nodiscard]] const Mat3<T>& currentTransform() const { return m.stageTransform<T>(); }
+    template<typename T> [[nodiscard]] const Mat3<T>& inverseTransform() const { return m.worldTransform<T>(); }
 
     void resetTransform()
     {
@@ -677,21 +701,59 @@ public:
         SimplePainter::resetTransform();
     }
 
-    void transform(const DDMat3& _m) {
+    template<typename T>
+    void transform(const Mat3<T>& _m) {
         if (transform_coordinates)
+        {
+            constexpr FloatType new_precision = float_index_v<T>;
+            if (new_precision > m.maxPrecision())
+                m.setMaxPrecision(new_precision); // todo: Allow downgrading? (especially when changing scene)
+
             m.transform(_m);
+        }
         else
             SimplePainter::transform(static_cast<FMat3>(_m));
     }
 
-    void setTransform(const DDMat3& _m) {
-        if (transform_coordinates) {
+    template<typename T>
+    void setTransform(const Mat3<T>& _m)
+    {
+        if (transform_coordinates)
+        {
+            constexpr FloatType new_precision = float_index_v<T>;
+            if (new_precision > m.maxPrecision())
+                m.setMaxPrecision(new_precision); // todo: Allow downgrading? (especially when changing scene)
+
             m.reset();
             m.transform(_m);
         }
         else {
             SimplePainter::resetTransform();
             SimplePainter::transform(static_cast<FMat3>(_m));
+        }
+    }
+
+    void transform(const WorldStageTransform& _m)
+    {
+        switch (_m.maxPrecision())
+        {
+            case FloatType::F32:
+            case FloatType::F64:  transform<f64>((DMat3)_m);     break;
+            case FloatType::FDD: transform<fdd>((DDMat3)_m); break;
+            case FloatType::FQD: transform<fqd>((QDMat3)_m); break;
+            default: break;
+        }
+    }
+
+    void setTransform(const WorldStageTransform& _m)
+    {
+        switch (_m.maxPrecision())
+        {
+            case FloatType::F32:
+            case FloatType::F64:  setTransform<f64>((DMat3)_m);     break;
+            case FloatType::FDD: setTransform<fdd>((DDMat3)_m); break;
+            case FloatType::FQD: setTransform<fqd>((QDMat3)_m); break;
+            default: break;
         }
     }
 
@@ -730,8 +792,8 @@ private:
 
     // ======== Position/Size wrappers (applies only enabled camera transforms) ========
 
-    // IF (transform_coordinates)    Input = World (f64/f128),   Output = Stage (f64)
-    // IF (!transform_coordinates)   Input = Stage (f64/f128),   Output = Stage (f64)
+    // IF (transform_coordinates)    Input = World (f64/fdd/fqd),   Output = Stage (f64)
+    // IF (!transform_coordinates)   Input = Stage (f64/fdd/fqd),   Output = Stage (f64)
 
     template<typename T> DVec2    PT(T x, T y)    const { return transform_coordinates ? m.toStage<T>(x, y) : Vec2{ (f64)x, (f64)y }; }
     template<typename T> DVec2    PT(Vec2<T> p)   const { return transform_coordinates ? m.toStage<T>(p) : static_cast<DVec2>(p); }
@@ -759,7 +821,7 @@ public:
     {
         this->line_width = w;
         if (scale_lines)
-            SimplePainter::setLineWidth(w * _avgAdjustedZoom());
+            SimplePainter::setLineWidth(w * lineScale() * _avgAdjustedZoom());
         else
             SimplePainter::setLineWidth(w * lineScale());
     }
@@ -893,30 +955,30 @@ public:
     template<typename T> void strokeRect(T x, T y, T w, T h)
     {
         ScopedResetTransform t(this);
-        DVec2 s = TRANSFORMED(x, y, w, h, m._angle());
+        DVec2 s = TRANSFORMED(x, y, w, h, m._angle<T>());
         SimplePainter::strokeRect(0, 0, s.x, s.y);
     }
     template<typename T> void fillRect(T x, T y, T w, T h)
     {
         ScopedResetTransform t(this);
-        DVec2 s = TRANSFORMED(x, y, w, h, m._angle());
+        DVec2 s = TRANSFORMED(x, y, w, h, m._angle<T>());
         SimplePainter::fillRect(0, 0, s.x, s.y);
     }
     template<typename T> void strokeRoundedRect(T x, T y, T w, T h, T r) {
         ScopedResetTransform t(this);
-        DVec2 s = TRANSFORMED(x, y, w, h, m._angle());
+        DVec2 s = TRANSFORMED(x, y, w, h, m._angle<T>());
         SimplePainter::strokeRoundedRect(0, 0, s.x, s.y, SIZE(r));
     }
     template<typename T> void fillRoundedRect(T x, T y, T w, T h, T r)
     {
         ScopedResetTransform t(this);
-        DVec2 s = TRANSFORMED(x, y, w, h, m._angle());
+        DVec2 s = TRANSFORMED(x, y, w, h, m._angle<T>());
         SimplePainter::fillRoundedRect(0, 0, s.x, s.y, SIZE(r));
     }
     template<typename T> void strokeEllipse(T cx, T cy, T rx, T ry)
     {
         ScopedResetTransform t(this);
-        DVec2 s = TRANSFORMED(cx, cy, rx, ry, m._angle());
+        DVec2 s = TRANSFORMED(cx, cy, rx, ry, m._angle<T>());
         SimplePainter::beginPath();
         SimplePainter::ellipse(0, 0, s.x, s.y);
         SimplePainter::stroke();
@@ -924,7 +986,7 @@ public:
     template<typename T> void fillEllipse(T cx, T cy, T rx, T ry)
     {
         ScopedResetTransform t(this);
-        DVec2 s = TRANSFORMED(cx, cy, rx, ry, m._angle());
+        DVec2 s = TRANSFORMED(cx, cy, rx, ry, m._angle<T>());
         SimplePainter::beginPath();
         SimplePainter::ellipse(0, 0, s.x, s.y);
         SimplePainter::fill();
@@ -938,6 +1000,7 @@ public:
     template<typename T> void strokeRect(const Rect<T>& r)                             { strokeRect<T>(r.x1, r.y1, r.x2 - r.x1, r.y2 - r.y1); }
     template<typename T> void strokeRect(const Rect<T>& r, Color col)                  { setStrokeStyle(col); strokeRect<T>(r.x1, r.y1, r.x2 - r.x1, r.y2 - r.y1); }
     template<typename T> void fillRect(const Rect<T>& r)                               { fillRect<T>(r.x1, r.y1, r.x2 - r.x1, r.y2 - r.y1); }
+    template<typename T> void fillRect(T x, T y, T w, T h, Color col)                  { setFillStyle(col); fillRect<T>(x, y, w, h); }
     template<typename T> void fillRect(const Rect<T>& r, Color col)                    { setFillStyle(col); fillRect<T>(r.x1, r.y1, r.x2 - r.x1, r.y2 - r.y1); }
     template<typename T> void strokeRoundedRect(const Rect<T>& r, T radius)            { strokeRoundedRect<T>(r.x1, r.y1, r.x2 - r.x1, r.y2 - r.y1, radius); }
     template<typename T> void strokeRoundedRect(const Rect<T>& r, T radius, Color col) { setStrokeStyle(col); strokeRoundedRect<T>(r.x1, r.y1, r.x2 - r.x1, r.y2 - r.y1, radius); }
@@ -1007,13 +1070,24 @@ public:
         }
     }
 
+    void transform(const CameraInfo& camera)
+    {
+        transform(cameraTransform(camera));
+    }
+
+    void setTransform(const CameraInfo& camera)
+    {
+        setTransform(cameraTransform(camera));
+    }
+
     // ======== Image ========
 
     //void drawImage(Image& bmp, f64 x, f64 y, f64 w = 0, f64 h = 0) {
     //    SimplePainter::drawImage(bmp, x, y, w <= 0 ? bmp.bmp_width : w, h <= 0 ? bmp.bmp_height : h);
     //}
 
-    template<typename T> void drawImage(const Image& bmp, Quad<T> q)
+    template<typename T>
+    void drawImage(const Image& bmp, Quad<T> q)
     {
         DQuad quad = { PT(q.a), PT(q.b), PT(q.c), PT(q.d) };
 
@@ -1024,6 +1098,7 @@ public:
         bmp.refreshData(vg);
 
         nvgSave(vg);
+        nvgResetTransform(vg);
         nvgTransform(vg, (f32)u.x, (f32)u.y, (f32)v.x, (f32)v.y, (f32)a.x, (f32)a.y);
         NVGpaint paint = nvgImagePattern(vg, 0, 0, 1, 1, 0.0f, bmp.imageId(), 1.0f);
         nvgBeginPath(vg);
@@ -1033,24 +1108,52 @@ public:
 
         nvgRestore(vg);
     }
-    template<typename T> void drawImage(const WorldImageT<T>& bmp)
+    template<typename T>
+    void drawImage(const WorldImageT<T>& bmp)
     {
         drawImage(bmp, bmp.worldQuad());
     }
 
-    void drawShaderSurface(const ShaderSurface& surf, f32 x, f32 y, f32 w, f32 h, f32 alpha = 1.0f) const
+    template<typename T>
+    void drawShaderSurface(const ShaderSurface& surf, Quad<T> q, f32 alpha = 1.0f)
     {
         int img = surf.nvgImageId(vg);
         if (!img)
             return;
 
-        NVGpaint paint = nvgImagePattern(vg, x, y, w, h, 0.0f, img, alpha);
+        DQuad quad = { PT(q.a), PT(q.b), PT(q.c), PT(q.d) };
 
-        nvgBeginPath(vg);
-        nvgRect(vg, x, y, w, h);
-        nvgFillPaint(vg, paint);
-        nvgFill(vg);
+        DVec2 a = quad.a;
+        DVec2 u = quad.b - quad.a;
+        DVec2 v = quad.d - quad.a;
+
+        SimplePainter::save();
+        SimplePainter::resetTransform();
+        SimplePainter::transform(default_viewport_transform);
+        SimplePainter::transform((f32)u.x, (f32)u.y, (f32)v.x, (f32)v.y, (f32)a.x, (f32)a.y);
+
+        PaintStyle paint = SimplePainter::imagePattern(0, 0, 1, 1, 0.0f, img, alpha);
+
+        SimplePainter::beginPath();
+        SimplePainter::rect(0, 0, 1, 1);
+        SimplePainter::setFillStyle(paint);
+        SimplePainter::fill();
+        SimplePainter::restore();
     }
+
+    //void drawShaderSurface(const ShaderSurface& surf, f64 x, f64 y, f64 w, f64 h, f64 alpha = 1.0) const
+    //{
+    //    int img = surf.nvgImageId(vg);
+    //    if (!img)
+    //        return;
+    //
+    //    NVGpaint paint = nvgImagePattern(vg, x, y, w, h, 0.0f, img, alpha);
+    //
+    //    nvgBeginPath(vg);
+    //    nvgRect(vg, x, y, w, h);
+    //    nvgFillPaint(vg, paint);
+    //    nvgFill(vg);
+    //}
 
     // ======== Text ========
 
@@ -1065,11 +1168,11 @@ public:
         TRANSLATE(px, py);
 
         if (rotate_text)
-            ROTATE(m._angle());
+            ROTATE(m._angle<T>());
 
         if (scale_text)
         {
-            DVec2 z = m._zoom();
+            DVec2 z = m._zoom<T>();
             SimplePainter::scale(z.x, z.y);
         }
 
@@ -1092,7 +1195,8 @@ public:
 private:
 
     [[nodiscard]] std::string formatNumberScientific(f64 v, int decimals, f64 fixed_min = 0.001, f64 fixed_max = 100000);
-    [[nodiscard]] std::string formatNumberScientific(f128 v, int decimals, f64 fixed_min = 0.001, f64 fixed_max = 100000);
+    [[nodiscard]] std::string formatNumberScientific(fdd v, int decimals, f64 fixed_min = 0.001, f64 fixed_max = 100000);
+    [[nodiscard]] std::string formatNumberScientific(fqd v, int decimals, f64 fixed_min = 0.001, f64 fixed_max = 100000);
 
     const f64 exponent_font_scale = 0.85;
     const f64 exponent_spacing_x = 0.06;

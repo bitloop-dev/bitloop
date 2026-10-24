@@ -36,7 +36,7 @@ struct ExampleText_Scene : public Scene<ExampleText_Scene>
     void sceneStart() override;
     void sceneMounted(Viewport* viewport) override;
     void sceneDestroy() override;
-    void sceneProcess() override;
+    void sceneProcess(double dt) override;
 
     /// ─────── Viewport methods ─────── 
     void viewportProcess(Viewport* ctx, double dt) override;

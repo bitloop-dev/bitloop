@@ -13,7 +13,7 @@
 //#define BL_ENABLE_SIMULATED_DEVICE
 
 #ifdef BL_ENABLE_SIMULATED_DEVICE
-struct DebugDevicePreset { int w; int h; float dpr; int threads; };
+    struct DebugDevicePreset { int w; int h; float dpr; int threads; };
 
     /// --- flags ---
     #define BL_SIMULATE_MOBILE  // platform()->isMobile() == true + use mouse to emulate touch

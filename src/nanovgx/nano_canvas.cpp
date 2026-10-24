@@ -23,8 +23,7 @@ inline flt niceStepDivisible(flt ideal, flt& coarse, flt& fade)
     int n = 0;
     for (int d = 0; d <= 1; ++d) 
     {
-        //const f128 v = pow(10, exp10 + f128(d));
-        const flt v = (flt)pow10_128(exp10 + d); // todo: optimize for f64 (don't use f128 pow10)
+        const flt v = bl::ipow(flt{ 10 }, exp10 + d);
         for (int i = 0; i < nice_steps_count; ++i)
             candidates[n++] = nice_steps[i] * v;
     }
@@ -47,7 +46,7 @@ inline flt niceStepDivisible(flt ideal, flt& coarse, flt& fade)
     }
 
     // Calculate fade (how far ideal lies between step and coarse)
-    fade = bl::clamp((ideal - step) / (coarse - step), 0.0, 1.0);
+    fade = bl::clamp((ideal - step) / (coarse - step), flt{ 0.0 }, flt{ 1.0 });
     return step;
 }
 
@@ -87,20 +86,46 @@ std::string Painter::formatNumberScientific(f64 v, int decimals, f64 fixed_min, 
 
     return s;
 }
-std::string Painter::formatNumberScientific(f128 v, int decimals, f64 fixed_min, f64 fixed_max) {
-    f128 abs_v = abs(v);
+std::string Painter::formatNumberScientific(fdd v, int decimals, f64 fixed_min, f64 fixed_max) {
+    fdd abs_v = abs(v);
 
     std::string s;
     if ((abs_v != 0 && abs_v < fixed_min) || abs_v >= fixed_max)
     {
         // Use scientific notation (strip zeros)
-        s = to_string(abs_v, decimals, false, true, true);
+        s = bl::to_string(
+            abs_v,
+            decimals,
+            std::ios_base::scientific,
+            bl::trailing_zero_policy::strip);
     }
     else {
         // Use fixed-point (keep trailing zeros for consistency)
-        s = to_string(abs_v, decimals, true, false, false);
+        s = to_string(abs_v, decimals, std::ios_base::fixed);
     }
     if (v >= 0)
+        return s;
+    else
+        return '-' + s;
+}
+std::string Painter::formatNumberScientific(fqd v, int decimals, f64 fixed_min, f64 fixed_max) {
+    fqd abs_v = abs(v);
+
+    std::string s;
+    if ((abs_v != 0.0 && abs_v < fixed_min) || abs_v >= fixed_max)
+    {
+        // Use scientific notation (strip zeros)
+        s = bl::to_string(
+            abs_v,
+            decimals,
+            std::ios_base::scientific,
+            bl::trailing_zero_policy::strip);
+    }
+    else {
+        // Use fixed-point (keep trailing zeros for consistency)
+        s = bl::to_string(abs_v, decimals, std::ios_base::fixed);
+    }
+    if (v >= 0.0)
         return s;
     else
         return '-' + s;
@@ -116,9 +141,10 @@ void Painter::drawWorldAxis(f64 axis_opacity, f64 grid_opacity, f64 text_opacity
     typedef Vec2<flt> vec2;
 
     //Viewport* ctx = camera.viewport;
-    const f64 angle = m._angle();
-    //const DDVec2 zoom(camera.zoom<f128>(), camera.zoom<f128>());
+    const f64 angle = m._angle<flt>();
     const vec2 zoom(m._zoom<flt>());
+    // Tick spacing depends on scale magnitude, not reflection direction.
+    const vec2 zoom_magnitude{ std::abs(zoom.x), std::abs(zoom.y) };
 
     // ======== viewport world bounds ========
     const vec2 TL = m.toWorld<flt>(0, 0);
@@ -135,8 +161,8 @@ void Painter::drawWorldAxis(f64 axis_opacity, f64 grid_opacity, f64 text_opacity
     // ======== Step calculation ========
     const flt targetPx = flt{ scale_size(140.0) };
     flt coarseX, coarseY, fadeX, fadeY;
-    const flt stepX = niceStepDivisible<flt>(targetPx / zoom.x, coarseX, fadeX);
-    const flt stepY = niceStepDivisible<flt>(targetPx / zoom.y, coarseY, fadeY);
+    const flt stepX = niceStepDivisible<flt>(targetPx / zoom_magnitude.x, coarseX, fadeX);
+    const flt stepY = niceStepDivisible<flt>(targetPx / zoom_magnitude.y, coarseY, fadeY);
 
     worldHudMode();
 
@@ -207,13 +233,13 @@ void Painter::drawWorldAxis(f64 axis_opacity, f64 grid_opacity, f64 text_opacity
             int decimals = 0;
             if (isX)
             {
-                if (zoom.x > 1.0)
-                    decimals = (1 + math::countWholeDigits(zoom.x * 0.0125));
+                if (zoom_magnitude.x > 1.0)
+                    decimals = (1 + math::countWholeDigits(zoom_magnitude.x * 0.0125));
             }
             else
             {
-                if (zoom.y > 1.0)
-                    decimals = (1 + math::countWholeDigits(zoom.y * 0.0125));
+                if (zoom_magnitude.y > 1.0)
+                    decimals = (1 + math::countWholeDigits(zoom_magnitude.y * 0.0125));
             }
 
             // multiply epsilon by large number of potential steps to avoid rounding error

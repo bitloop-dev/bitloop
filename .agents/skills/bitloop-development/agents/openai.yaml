@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bitloop Development"
+  short_description: "Develop and diagnose Bitloop projects"
+  default_prompt: "Use $bitloop-development to implement this Bitloop project task with the relevant framework guidance."
