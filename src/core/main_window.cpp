@@ -813,10 +813,8 @@ void MainWindow::_beginSnapshot(const char* filepath [[maybe_unused]], IVec2 res
 {
     // begin snapshot with provided args (lowest level, no awareness of presets)
 
-    CaptureManager& capture_manager = capture_context.manager();
-
-    assert(!capture_manager.isRecording());
-    assert(!capture_manager.isSnapshotting());
+    assert(!capture_context.manager().isRecording());
+    assert(!capture_context.manager().isSnapshotting());
 
     // disable everything until snapshot complete
     snapshot.enabled = false;
@@ -840,7 +838,26 @@ void MainWindow::_beginSnapshot(const char* filepath [[maybe_unused]], IVec2 res
     config.filename = filepath;
     #endif
 
-    capture_manager.startCapture(config);
+    const auto project = project_worker()->getCurrentProject();
+    const int project_uid = project->getProjectInfo()->sim_uid;
+    project_worker()->requestSnapshot(
+        [this, config, project_uid](std::optional<SnapshotFrame> output, std::string error) mutable
+        {
+            const auto current = project_worker()->getCurrentProject();
+            if (!current || current->getProjectInfo()->sim_uid != project_uid)
+                error = "The project changed before its snapshot was captured";
+            if (!error.empty())
+            {
+                blPrint() << error;
+                capture_context.is_snapshotting_list = false;
+                capture_context.manager().failCapture();
+                return;
+            }
+            if (output) config.resolution = output->resolution;
+            capture_context.prepared_snapshot = std::move(output);
+            capture_context.new_frame_prepared = false;
+            capture_context.manager().startCapture(config);
+        });
 }
 void MainWindow::beginSnapshot(const CapturePreset& preset, const char* rel_path_fmt, int file_idx)
 {
@@ -1024,6 +1041,12 @@ void MainWindow::handleCommand(MainWindowCommandEvent e)
     {
     case MainWindowCommandType::ON_SELECT_PROJECT:
     {
+        std::string window_name = std::any_cast<std::string>(e.payload);
+        #ifdef BL_DEBUG
+        window_name += " (debug)";
+        #endif
+        SDL_SetWindowTitle(platform()->sdlWindow(), window_name.c_str());
+
         // in a "stopped" state to begin with
         play.enabled = true;
         stop.enabled = false;
@@ -1077,7 +1100,7 @@ void MainWindow::handleCommand(MainWindowCommandEvent e)
     case MainWindowCommandType::ON_PAUSED_PROJECT:
         play.enabled = true;
         pause.enabled = false;
-        snapshot.enabled = false; // only allow snapshot while project running
+        snapshot.enabled = !capture_context.manager().isRecording();
         break;
 
     case MainWindowCommandType::BEGIN_SNAPSHOT_ACTIVE_PRESET:
@@ -1748,28 +1771,35 @@ void MainWindow::populateViewport(bool& projectDrawn)
                 if (preprocess_frame)
                     capture_context.use_preprocessor_texture = preprocessFrame(capturing_frame);
 
-                if (project_worker()->hasRunningProject())
+                if (project_worker()->hasRunningProject() || capture_manager.isSnapshotting())
                 {
                     // Even if not recording, behave as though we are for consistency
                     capture_context.captured_last_frame = capture_context.permit_frame_capture;
 
-                    if (capturing_frame)
+                    if (capturing_frame || capture_context.prepared_snapshot)
                     {
                         // give project a chance to attach metadata to the frame before sending it to the encoder
                         CapturePreset preset_info = *capture_context.active_preset;
+                        if (capture_context.prepared_snapshot)
+                            preset_info.setResolution(capture_context.prepared_snapshot->resolution);
                         preset_info.setVideo(capture_manager.isRecording()); // Tell user whether preset is being used a video or snapshot
+                        EncodeFrame& encoded_frame = capture_context.prepared_snapshot
+                            ? capture_context.prepared_snapshot->frame
+                            : capture_context.preprocessed_frame;
                         project_worker()->onEncodeFrame(
-                            capture_context.preprocessed_frame,
+                            encoded_frame,
                             capture_context.active_snapshot_preset_request_id,
                             preset_info);
 
                         // send to encoder
-                        capture_manager.encodeFrame(capture_context.preprocessed_frame);
+                        capture_manager.encodeFrame(encoded_frame);
+                        capture_context.prepared_snapshot.reset();
                     }
 
-                    // Force worker to tell us when it wants to encode a new frame
-                    capture_context.permit_frame_capture = false;
                 }
+
+                // Force worker to tell us when it wants to encode a new frame.
+                capture_context.permit_frame_capture = false;
 
                 shared_sync.frame_ready_to_draw = false;
                 shared_sync.frame_consumed = true;
@@ -1977,11 +2007,18 @@ void MainWindow::populateUI()
     {
         // prevent deadlock if worker thread is waiting
         std::unique_lock<std::mutex> shadow_lock(shared_sync.shadow_buffer_mutex, std::defer_lock);
+#ifdef BL_WEB_BUILD
+        // GPU startup may await browser tasks while holding this lock. Let the
+        // main event loop run and try the UI again on the next animation frame.
+        if (!shadow_lock.try_lock())
+            return;
+#else
         while (!shadow_lock.try_lock())
         {
             thread_queue.pump();
             std::this_thread::yield();
         }
+#endif
 
         // ------------------------------------------------------------------------------------------------------------
         // For the rest of this scope, it's safe to mutate GUI data buffers in preparation for the next worker frame...

@@ -1,5 +1,10 @@
 # bitloop/CMakeLists.txt
 cmake_minimum_required(VERSION 3.21)
+option(BITLOOP_WITH_WEBGPU "Build the optional WebGPU compute component" OFF)
+if(BITLOOP_WITH_WEBGPU AND CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    list(APPEND VCPKG_MANIFEST_FEATURES webgpu)
+    list(REMOVE_DUPLICATES VCPKG_MANIFEST_FEATURES)
+endif()
 project(bitloop VERSION 0.9 LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
@@ -13,6 +18,10 @@ option(BITLOOP_BUILD_TESTS      "Build tests"                   ${PROJECT_IS_TOP
 set(BL_SIM_CMAKE "${CMAKE_CURRENT_LIST_DIR}/cmake/bitloopSimulation.cmake")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${BL_SIM_CMAKE}")
 include(${BL_SIM_CMAKE})
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/bitloopWebGPU.cmake")
+if(BITLOOP_WITH_WEBGPU)
+    bitloop_add_webgpu()
+endif()
 
 # ----------------------------
 # Discovery mode: provide bitloop::bitloop and stop here
@@ -318,6 +327,9 @@ install(TARGETS bitloop
     LIBRARY  DESTINATION lib
     RUNTIME  DESTINATION bin
 )
+if(TARGET bitloop-webgpu)
+    install(TARGETS bitloop-webgpu EXPORT bitloopTargets ARCHIVE DESTINATION lib LIBRARY DESTINATION lib RUNTIME DESTINATION bin)
+endif()
 
 # ──────── Install public headers ────────
 install(DIRECTORY
@@ -363,6 +375,7 @@ endif()
 # ──────── Install simulation cmake helpers ────────
 install(FILES
    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/bitloopSimulation.cmake"
+   "${CMAKE_CURRENT_SOURCE_DIR}/cmake/bitloopWebGPU.cmake"
    DESTINATION share/bitloop/cmake
  )
 

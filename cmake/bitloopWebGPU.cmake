@@ -1,0 +1,53 @@
+include_guard(GLOBAL)
+
+option(BITLOOP_WEBGPU_ASYNC_WAIT "Enable cooperative WebGPU waits through Emscripten Asyncify" OFF)
+
+function(bitloop_deploy_webgpu_runtime target)
+    if(NOT WIN32 OR BITLOOP_DISCOVERY OR NOT TARGET bitloop::webgpu)
+        return()
+    endif()
+    get_target_property(deployed ${target} BITLOOP_WEBGPU_RUNTIME_DEPLOYED)
+    if(deployed)
+        return()
+    endif()
+    find_package(Dawn CONFIG REQUIRED)
+    get_target_property(compiler_files dawn::webgpu_dawn DAWN_RUNTIME_FILES)
+    if(NOT compiler_files)
+        message(FATAL_ERROR "Windows WebGPU needs Dawn[dxc]. Sync Bitloop project tooling and enable the dxc dependency feature.")
+    endif()
+    # Dawn loads these DLLs dynamically, so normal linker dependency scanning misses them.
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${compiler_files} $<TARGET_RUNTIME_DLLS:${target}> $<TARGET_FILE_DIR:${target}>
+        COMMAND_EXPAND_LISTS VERBATIM)
+    install(FILES ${compiler_files} $<TARGET_RUNTIME_DLLS:${target}> DESTINATION bin)
+    set_property(TARGET ${target} PROPERTY BITLOOP_WEBGPU_RUNTIME_DEPLOYED TRUE)
+endfunction()
+
+function(bitloop_add_webgpu)
+    if(TARGET bitloop::webgpu)
+        return()
+    endif()
+    get_filename_component(bitloop_root "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/.." ABSOLUTE)
+    if(BITLOOP_DISCOVERY)
+        add_library(bitloop-webgpu INTERFACE)
+    else()
+        find_package(Dawn CONFIG REQUIRED)
+        add_library(bitloop-webgpu STATIC "${bitloop_root}/src/gpu/webgpu.cpp")
+        target_compile_features(bitloop-webgpu PUBLIC cxx_std_20)
+        target_include_directories(bitloop-webgpu PUBLIC
+            "$<BUILD_INTERFACE:${bitloop_root}/include>"
+            "$<INSTALL_INTERFACE:include>"
+        )
+        target_link_libraries(bitloop-webgpu PUBLIC dawn::webgpu_dawn)
+        set_target_properties(bitloop-webgpu PROPERTIES EXPORT_NAME webgpu POSITION_INDEPENDENT_CODE ON)
+        if(EMSCRIPTEN)
+            target_compile_options(bitloop-webgpu PUBLIC -pthread)
+            target_link_options(bitloop-webgpu INTERFACE -pthread)
+            if(BITLOOP_WEBGPU_ASYNC_WAIT)
+                target_compile_definitions(bitloop-webgpu PRIVATE BITLOOP_WEBGPU_ASYNC_WAIT=1)
+                target_link_options(bitloop-webgpu INTERFACE -sASYNCIFY=1)
+            endif()
+        endif()
+    endif()
+    add_library(bitloop::webgpu ALIAS bitloop-webgpu)
+endfunction()

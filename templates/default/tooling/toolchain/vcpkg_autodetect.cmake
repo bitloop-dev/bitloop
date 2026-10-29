@@ -317,22 +317,39 @@ file(MAKE_DIRECTORY "${BL_MERGED_MANIFEST_DIR}")
 
 include("${_project_dir}/tooling/toolchain/merge_vcpkg_manifests.cmake")
 set(_bl_provided_ports "")
+set(_bl_source_manifest "")
+set(_bl_source_features "")
 if(BITLOOP_RESOLVED_PROVIDER STREQUAL "SOURCE")
   list(APPEND _bl_provided_ports bitloop)
+  set(_bl_source_manifest "${BITLOOP_RESOLVED_SOURCE_DIR}/vcpkg.json")
+  if(BITLOOP_WITH_WEBGPU)
+    list(APPEND _bl_source_features webgpu)
+  endif()
 endif()
 
 bl_merge_vcpkg_manifests(
   ROOT_MANIFEST   "${_project_dir}/vcpkg.json"
   CHILD_MANIFESTS "${BL_CHILD_MANIFESTS}"
   PROVIDED_PORTS  "${_bl_provided_ports}"
+  SOURCE_MANIFEST "${_bl_source_manifest}"
+  SOURCE_FEATURES "${_bl_source_features}"
   OUT_DIR         "${BL_MERGED_MANIFEST_DIR}"
   MODE            "UNION"
 )
+
+if(BITLOOP_RESOLVED_PROVIDER STREQUAL "SOURCE" AND "webgpu" IN_LIST BL_SOURCE_FEATURES)
+  set(BITLOOP_WITH_WEBGPU ON)
+endif()
 
 # Point vcpkg at the generated manifest (must be set before including vcpkg.cmake)
 set(VCPKG_MANIFEST_DIR "${BL_MERGED_MANIFEST_DIR}" CACHE PATH "" FORCE)
 set(VCPKG_MANIFEST_INSTALL ON CACHE BOOL "" FORCE)
 
+
+# Managed overlays supply the WebGPU compiler feature on the pinned Dawn release.
+get_filename_component(_bl_ports "${CMAKE_CURRENT_LIST_DIR}/../ports" ABSOLUTE)
+list(APPEND VCPKG_OVERLAY_PORTS "${_bl_ports}")
+list(REMOVE_DUPLICATES VCPKG_OVERLAY_PORTS)
 
 # Finally, load vcpkg toolchain
 set_property(GLOBAL PROPERTY BITLOOP_VCPKG_TOOLCHAIN_READY TRUE)

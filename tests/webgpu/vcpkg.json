@@ -1,0 +1,16 @@
+{
+  "name": "bitloop-webgpu-tests",
+  "version-string": "0.1.0",
+  "builtin-baseline": "74e6536215718009aae747d86d84b78376bf9e09",
+  "dependencies": [
+    {
+      "name": "dawn",
+      "default-features": false,
+      "features": [
+        { "name": "dxc", "platform": "windows" },
+        { "name": "metal", "platform": "osx | ios" },
+        { "name": "vulkan", "platform": "linux | android" }
+      ]
+    }
+  ]
+}

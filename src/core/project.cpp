@@ -1887,15 +1887,6 @@ void ProjectBase::_projectProcess()
         for (Viewport* viewport : viewports)
         {
             viewport->scene->viewportProcess(viewport, dt);
-
-            // all viewports need redraw if surface changes size
-            if (viewport_rects_updated || viewport->focused_dt > 0)
-                viewport->scene->needs_redraw = true;
-
-            // if any scene needs a redraw (including from surface size change), mark the canvas
-            // as dirty so it gets redrawn by imgui
-            if (viewport->scene->needs_redraw)
-                canvas_dirty = true;
         }
 
         /// --- Post-Process each scene ---
@@ -1908,6 +1899,15 @@ void ProjectBase::_projectProcess()
         // Prepare to encode the next frame
         if (!done_single_process)
             did_first_process = true;
+    }
+
+    // Paused edits and restart requests still need a fresh view of the committed state.
+    for (Viewport* viewport : viewports)
+    {
+        if (viewport_rects_updated || viewport->focused_dt > 0)
+            viewport->scene->needs_redraw = true;
+        if (viewport->scene->needs_redraw)
+            canvas_dirty = true;
     }
 
     if (did_first_process)
@@ -2300,6 +2300,17 @@ void ProjectBase::_dispatchInputEvent(const EventData& e, const InputDispatchCon
         // but keep onEvent generic so users can retain full control.
         scene->_onEvent(event);
     }
+}
+
+bool ProjectBase::captureSnapshot(SnapshotFrame& output) const
+{
+    if (active_scenes.size() != 1 || !active_scenes.front()->captureSnapshot(output))
+        return false;
+    // Custom dimensions must describe the supplied buffer before the encoder can use it.
+    if (output.resolution.x <= 0 || output.resolution.y <= 0 ||
+        output.frame.size() != size_t(output.resolution.x) * output.resolution.y * 4)
+        throw std::runtime_error("Custom snapshot dimensions must match its RGBA8 pixels");
+    return true;
 }
 
 void ProjectBase::_onEncodeFrame(EncodeFrame& data, int request_id, const CapturePreset& preset)

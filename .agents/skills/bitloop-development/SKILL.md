@@ -9,9 +9,15 @@ Use the smallest relevant reference set. Do not load every reference preemptivel
 
 Name C++ members without prefixes or suffixes such as `m_` or a trailing `_`; resolve ambiguity with `this->` or a clearer parameter/local name, and do not rename unrelated existing code solely for style.
 
-Omit comments for self-evident C++; add one brief intent comment before theory-dependent mathematical or scientific code.
+## C++ readability
 
-Prefer compact formatting and tolerate lines up to ~180 characters; wrap only when it clarifies structure, keeping related expressions together and aligning continuations when useful.
+Write code that is easy to scan and follow. Keep simple code compact where it remains clear.
+
+- Use Allman braces. Simple single-statement bodies may omit braces; use braces when nesting or complexity makes scope harder to follow.
+- Normally separate operations and declarations onto individual lines.
+- Group related work with blank lines, and wrap long expressions at meaningful boundaries.
+- Use brief section comments to identify meaningful stages, and explain non-obvious algorithmic choices. Avoid commenting every statement.
+- Review changed code for readability before finishing. Apply these guidelines with judgment rather than mechanically expanding everything.
 
 ## Establish ownership
 

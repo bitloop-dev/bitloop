@@ -23,6 +23,23 @@ MANAGED_FILES = (
     "toolchain/merge_vcpkg_manifests.cmake",
     "toolchain/vcpkg_autodetect.cmake",
     "triplets/wasm32-emscripten-multithreaded.cmake",
+    "ports/.gitattributes",
+    "ports/LICENSE.vcpkg.txt",
+    "ports/README.md",
+    "ports/dawn/000-fix-emdawnwebgpu.patch",
+    "ports/dawn/001-fix-windows-build.patch",
+    "ports/dawn/002-fix-uwp.patch",
+    "ports/dawn/003-fix-d3d11.patch",
+    "ports/dawn/004-deps.patch",
+    "ports/dawn/005-bsd-support.patch",
+    "ports/dawn/006-fix-x11-include-dirs.patch",
+    "ports/dawn/007-stable-d3d12-shader-cache.patch",
+    "ports/dawn/008-windows-dxc-package.patch",
+    "ports/dawn/DawnConfig.cmake",
+    "ports/dawn/portfile.cmake",
+    "ports/dawn/unofficial_webgpu_dawn.pc.in",
+    "ports/dawn/usage",
+    "ports/dawn/vcpkg.json",
 )
 
 
@@ -72,7 +89,7 @@ def write_manifest(bitloop_root: Path, *, pack_revision: str) -> dict:
     }
     (source / MANIFEST_NAME).write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+        encoding="utf-8", newline="\n",
     )
     return manifest
 

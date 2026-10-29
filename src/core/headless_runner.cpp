@@ -1158,6 +1158,7 @@ namespace
         int snapshot_index)
     {
         bytebuf pixels;
+        std::string source_payload;
         if (!record.route.empty())
         {
             SimSnapshotImage image;
@@ -1167,6 +1168,7 @@ namespace
                 return false;
             }
             pixels = std::move(image.pixels);
+            source_payload = std::move(image.payload);
         }
         else
         {
@@ -1227,6 +1229,7 @@ namespace
         preset.setVideo(false);
 
         EncodeFrame frame(pixels);
+        frame.payload = std::move(source_payload);
         project.onHeadlessEncodeFrame(frame, preset);
 
         bytebuf encoded;
@@ -1260,9 +1263,10 @@ namespace
         record.filename = filename;
         record.rendered = true;
 
-        webp_set_save_string_as_xmp_inplace(
+        if (!webp_set_save_string_as_xmp_inplace(
             encoded,
-            frame.payload.empty() ? record.toJson().dump() : frame.payload);
+            frame.payload.empty() ? record.toJson().dump() : frame.payload))
+            throw std::runtime_error("Could not embed snapshot XMP state");
 
         const std::filesystem::path out_path = trace_dir / filename;
         std::filesystem::create_directories(out_path.parent_path());

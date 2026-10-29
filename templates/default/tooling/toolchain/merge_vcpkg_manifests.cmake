@@ -630,11 +630,48 @@ endfunction()
 # Main entry
 # -------------------------
 
+# Keep explicit feature requests when replacing a package with its source tree.
+# Third-party feature/platform expressions remain intact for vcpkg to resolve.
+function(_bl_collect_source_features manifest_json source_name features_var)
+  set(_features "${${features_var}}")
+  _bl_json_get(_deps "${manifest_json}" "dependencies")
+  if(NOT _deps)
+    return()
+  endif()
+  string(JSON _count LENGTH "${_deps}")
+  if(_count GREATER 0)
+    math(EXPR _last "${_count} - 1")
+    foreach(i RANGE 0 ${_last})
+      string(JSON _type TYPE "${_deps}" ${i})
+      if(NOT _type STREQUAL "OBJECT")
+        continue()
+      endif()
+      string(JSON _dep GET "${_deps}" ${i})
+      _bl_json_get(_name "${_dep}" "name")
+      if(NOT _name STREQUAL source_name)
+        continue()
+      endif()
+      _bl_json_get(_requested "${_dep}" "features")
+      if(_requested)
+        string(JSON _feature_count LENGTH "${_requested}")
+        if(_feature_count GREATER 0)
+          math(EXPR _feature_last "${_feature_count} - 1")
+          foreach(j RANGE 0 ${_feature_last})
+            string(JSON _feature GET "${_requested}" ${j})
+            list(APPEND _features "${_feature}")
+          endforeach()
+        endif()
+      endif()
+    endforeach()
+  endif()
+  set(${features_var} "${_features}" PARENT_SCOPE)
+endfunction()
+
 function(bl_merge_vcpkg_manifests)
   cmake_parse_arguments(BL
     "ALLOW_CHILD_OVERRIDES;VERBOSE"
-    "ROOT_MANIFEST;OUT_DIR;MODE"
-    "CHILD_MANIFESTS;PROVIDED_PORTS"
+    "ROOT_MANIFEST;OUT_DIR;MODE;SOURCE_MANIFEST"
+    "CHILD_MANIFESTS;PROVIDED_PORTS;SOURCE_FEATURES"
     ${ARGV}
   )
 
@@ -668,6 +705,13 @@ function(bl_merge_vcpkg_manifests)
   # Load root JSON
   file(READ "${BL_ROOT_MANIFEST}" _root_json)
 
+  set(_source_features "${BL_SOURCE_FEATURES}")
+  if(BL_SOURCE_MANIFEST)
+    file(READ "${BL_SOURCE_MANIFEST}" _source_json)
+    _bl_json_get(_source_name "${_source_json}" "name")
+    _bl_collect_source_features("${_root_json}" "${_source_name}" _source_features)
+  endif()
+
   _bl_json_get(_root_name      "${_root_json}" "name")
   _bl_json_get(_root_version   "${_root_json}" "version-string")
   _bl_json_get(_root_baseline  "${_root_json}" "builtin-baseline")
@@ -689,6 +733,9 @@ function(bl_merge_vcpkg_manifests)
 
   foreach(m IN LISTS _children)
     file(READ "${m}" _child_json)
+    if(BL_SOURCE_MANIFEST)
+      _bl_collect_source_features("${_child_json}" "${_source_name}" _source_features)
+    endif()
 
     _bl_json_get(_child_baseline "${_child_json}" "builtin-baseline")
     if(_root_baseline AND _child_baseline AND NOT _root_baseline STREQUAL _child_baseline)
@@ -715,6 +762,17 @@ function(bl_merge_vcpkg_manifests)
       _names _frags _kinds
     )
   endforeach()
+
+  list(REMOVE_DUPLICATES _source_features)
+  foreach(_feature IN LISTS _source_features)
+    string(JSON _feature_json ERROR_VARIABLE _error GET "${_source_json}" features "${_feature}")
+    if(_error)
+      message(FATAL_ERROR "Source ${_source_name} does not provide feature '${_feature}': ${BL_SOURCE_MANIFEST}")
+    endif()
+    _bl_collect_deps("${BL_SOURCE_MANIFEST}[${_feature}]" "${_feature_json}"
+      "${BL_PROVIDED_PORTS}" _names _frags _kinds)
+  endforeach()
+  set(BL_SOURCE_FEATURES "${_source_features}" PARENT_SCOPE)
 
   _bl_build_deps_array_json("${_names}" "${_frags}" _deps_union_json)
 
@@ -767,6 +825,9 @@ function(bl_merge_vcpkg_manifests)
       set(_first FALSE) 
   endif()
   string(APPEND _out "\"dependencies\":${_deps_union_json}")
+  if(_root_features)
+    string(APPEND _out ",\"features\":${_root_features}")
+  endif()
 
   string(APPEND _out ",\"configuration\":${_merged_cfg_json}")
 

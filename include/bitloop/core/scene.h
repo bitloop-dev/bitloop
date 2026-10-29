@@ -32,6 +32,7 @@ class ProjectBase;
 
 class CaptureContext;
 class CaptureManager;
+struct SnapshotFrame;
 struct SettingsConfig;
 
 class SceneBase : public ChangeTracker
@@ -239,6 +240,9 @@ public:
 #endif
 
     virtual void onBeginSnapshot() {}
+    // Called on the simulation owner after a completed update, never from drawing.
+    // False preserves viewport capture; throw to report a failed custom snapshot.
+    virtual bool captureSnapshot(SnapshotFrame&) const { return false; }
     virtual void onEncodeFrame(EncodeFrame& data [[maybe_unused]], const CapturePreset& preset [[maybe_unused]]) {}
 
     void beginSnapshotList(

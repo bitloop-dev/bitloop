@@ -195,6 +195,91 @@ class CMakeProjectToolingTests(unittest.TestCase):
             dependencies = json.loads((output / "vcpkg.json").read_text(encoding="utf-8"))["dependencies"]
             self.assertEqual(dependencies, ["cpr", "zlib"])
 
+    def merge_feature_fixture(self, *, source_mode: bool, request_webgpu: bool) -> tuple[dict, list[str]]:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "bitloop.json"
+            (root / "vcpkg-configuration.json").write_text(
+                '{"default-registry":{"kind":"builtin","baseline":"fixture"}}\n',
+                encoding="utf-8",
+            )
+            child = root / "child.json"
+            manifest = root / "root.json"
+            dawn = {
+                "name": "dawn", "default-features": False,
+                "features": [{"name": "dxc", "platform": "windows"}],
+            }
+            source.write_text(json.dumps({
+                "name": "bitloop", "dependencies": ["sdl3"],
+                "features": {"webgpu": {"description": "compute", "dependencies": [dawn]}},
+            }), encoding="utf-8")
+            dependency = {"name": "bitloop", "features": ["webgpu"]} if request_webgpu else "bitloop"
+            child.write_text(json.dumps({"dependencies": [dependency]}), encoding="utf-8")
+            manifest.write_text(json.dumps({
+                "name": "root", "dependencies": ["bitloop"],
+                "features": {"tools": {"description": "tools", "dependencies": ["zlib"]}},
+            }), encoding="utf-8")
+            source_arguments = (
+                f'PROVIDED_PORTS bitloop SOURCE_MANIFEST "{cmake_path(source)}"'
+                if source_mode else ""
+            )
+            script = root / "merge.cmake"
+            script.write_text(textwrap.dedent(f"""
+                cmake_minimum_required(VERSION 3.21)
+                include("{cmake_path(MERGER)}")
+                bl_merge_vcpkg_manifests(
+                    ROOT_MANIFEST "{cmake_path(manifest)}"
+                    CHILD_MANIFESTS "{cmake_path(child)};{cmake_path(source) if source_mode else ''}"
+                    {source_arguments}
+                    OUT_DIR "{cmake_path(root / 'out')}")
+                file(WRITE "{cmake_path(root / 'features.txt')}" "${{BL_SOURCE_FEATURES}}")
+            """), encoding="utf-8")
+            result = subprocess.run([CMAKE, "-P", str(script)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            return (
+                json.loads((root / "out/vcpkg.json").read_text(encoding="utf-8")),
+                (root / "features.txt").read_text().split(),
+            )
+
+    def test_plain_source_dependency_does_not_install_dawn(self) -> None:
+        manifest, features = self.merge_feature_fixture(source_mode=True, request_webgpu=False)
+        self.assertEqual(manifest["dependencies"], ["sdl3"])
+        self.assertEqual(features, [])
+
+    def test_source_feature_keeps_dawn_backend_selection(self) -> None:
+        manifest, features = self.merge_feature_fixture(source_mode=True, request_webgpu=True)
+        self.assertEqual(features, ["webgpu"])
+        self.assertEqual(manifest["dependencies"], [
+            {"name": "dawn", "default-features": False,
+             "features": [{"name": "dxc", "platform": "windows"}]},
+            "sdl3",
+        ])
+
+    def test_package_feature_is_left_for_vcpkg(self) -> None:
+        manifest, features = self.merge_feature_fixture(source_mode=False, request_webgpu=True)
+        self.assertEqual(manifest["dependencies"], [{"name": "bitloop", "features": ["webgpu"]}])
+        self.assertEqual(features, [])
+
+    def test_root_features_survive_manifest_merge(self) -> None:
+        manifest, _ = self.merge_feature_fixture(source_mode=True, request_webgpu=False)
+        self.assertEqual(manifest["features"]["tools"]["dependencies"], ["zlib"])
+
+    def test_including_installed_helpers_does_not_build_webgpu(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script = root / "include.cmake"
+            helper = BITLOOP_ROOT / "cmake/bitloopWebGPU.cmake"
+            script.write_text(textwrap.dedent(f"""
+                cmake_minimum_required(VERSION 3.21)
+                set(BITLOOP_WITH_WEBGPU ON)
+                include("{cmake_path(helper)}")
+                if(TARGET bitloop::webgpu)
+                    message(FATAL_ERROR "Package helpers must not build source components")
+                endif()
+            """), encoding="utf-8")
+            result = subprocess.run([CMAKE, "-P", str(script)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_package_lookup_happens_after_languages_are_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

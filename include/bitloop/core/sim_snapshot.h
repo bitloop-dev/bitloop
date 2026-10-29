@@ -15,6 +15,7 @@ struct SimSnapshotImage
 {
     IVec2 resolution{0, 0};
     bytebuf pixels; // tightly packed RGBA8, top row first
+    std::string payload; // Optional application XMP, captured with these pixels on the owner.
 };
 
 struct SimSnapshotRequest

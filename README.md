@@ -50,6 +50,8 @@ Project-local CMake tooling can be checked or refreshed with `bitloop tooling sy
 
 An experimental source-build target, `bitloop-core` (alias `bitloop::core`), compiles an explicit subset of simulation and ImGui implementations. See [the core build notes](docs/experimental-core.md) for build instructions and current dependency limitations.
 
+Optional [WebGPU compute support](docs/webgpu.md) provides Dawn/Emdawn device and readback helpers through `bitloop::webgpu`, alongside the existing OpenGL renderer.
+
 Run `bitloop new project` interactively to choose Guided or Minimal scaffolding, optional AI development files, and—when invoked inside a Git worktree—publication to an existing empty remote plus submodule registration in the nearest enclosing repository. Scripted creation uses `bitloop new project <Name> --submodule --remote <RepositoryUrl>`. The child repository is committed and pushed; the parent gitlink is staged for review but never committed automatically.
 
 Run `bitloop copy project` to copy an existing project from the current directory under a new name, or supply both names: `bitloop copy project FluidLesson FluidSim`. It keeps the source's scaffolding and offers the same Git integration (`--submodule`, `--remote`, `--no-submodule`), without the template questions. Copying requires Git to apply the source's `.gitignore` files, including nested rules and negations, even when the source is untracked or has no repository. Git metadata is always excluded; enclosing repositories and global ignore rules do not affect the copy.

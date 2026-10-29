@@ -268,12 +268,10 @@ int bitloop_main(int argc, char* argv[])
 
         blPrint() << "Creating window...\n";
 
-        const char *window_name = 
-            #ifdef BL_DEBUG
-            "bitloop (debug)";
-            #else
-            "bitloop";
-            #endif
+        std::string window_name = ProjectBase::projectInfoList().front()->name;
+        #ifdef BL_DEBUG
+        window_name += " (debug)";
+        #endif
 
         auto window_flags = SDL_WINDOW_OPENGL | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_RESIZABLE;
 
@@ -286,7 +284,7 @@ int bitloop_main(int argc, char* argv[])
         window_flags |= SDL_WINDOW_MAXIMIZED;
         #endif
 
-        window = SDL_CreateWindow(window_name, fb_w, fb_h, window_flags);
+        window = SDL_CreateWindow(window_name.c_str(), fb_w, fb_h, window_flags);
 
         if (!window) {
             blPrint() << "SDL_CreateWindow failed: " << SDL_GetError() << "\n";

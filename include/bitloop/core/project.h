@@ -54,6 +54,7 @@ class CaptureContext;
 class CapturePreset;
 class SnapshotPresetManager;
 struct EncodeFrame;
+struct SnapshotFrame;
 struct SettingsConfig;
 
 struct ImDebugLog;
@@ -439,6 +440,9 @@ public:
     MouseInfo mouse;
 
     virtual ~ProjectBase();
+
+    // A single Scene may override snapshots. Composite projects can select their own source.
+    virtual bool captureSnapshot(SnapshotFrame& output) const;
 
     virtual InterfaceModel* getInterfaceModel() = 0;
 

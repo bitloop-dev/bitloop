@@ -129,7 +129,25 @@ bool MyScene::captureTraceSnapshot(std::string_view route, SimSnapshotImage& ima
 
 Select periodic routes with `--snapshot-every-frames N --snapshot-route primary:grid`, where `primary` is an active Scene ID. The route flag is repeatable; without it, periodic snapshots capture the visible layout. Scene code can also request `traceSnapshot("grid", "interface changed")` and run with `--snapshots`.
 
-The framework invokes the hook only for enabled capture requests, after frame processing and before the next frame. Its schedule is independent of semantic `traceFrame` collection. Custom images reuse lossless WebP encoding, embedded metadata, and `snapshots.jsonl`, including the route, Scene ID, frame/time, and actual dimensions. Routes need no additional Viewports; hidden Viewports also process and can duplicate viewport-owned simulation updates.
+The framework invokes the hook only for enabled capture requests, after frame processing and before the next frame. Its schedule is independent of semantic `traceFrame` collection. Custom images reuse lossless WebP encoding, embedded metadata, and `snapshots.jsonl`, including the route, Scene ID, frame/time, and actual dimensions. `SimSnapshotImage::payload` optionally supplies the image's XMP save string. Routes need no additional Viewports; hidden Viewports also process and can duplicate viewport-owned simulation updates.
+
+## Native Toolbar Snapshots
+
+For the ordinary Snapshot button, override this Scene hook (available in regular builds):
+
+```cpp
+bool MyScene::captureSnapshot(SnapshotFrame& output) const
+{
+    output.resolution = {grid_width, grid_height};
+    output.frame.data = grid_rgba;
+    output.frame.payload = serializeCurrentState();
+    return true;
+}
+```
+
+`data` owns tightly packed RGBA8 pixels, top row first. Capture pixels and any state payload together on this caller: the simulation worker invokes the hook after a completed update, including while paused, then transfers the owned result to the GUI before starting the existing encoder. It must not advance the simulation. Marshal backend readback to its required owner if necessary. No capture readback or serialization runs on ordinary frames.
+
+Return false to retain viewport/preset capture, or throw to report a capture error. The default Project hook delegates only when exactly one Scene is active; composite Projects keep the viewport fallback unless they override `ProjectBase::captureSnapshot`. The encoder uses the supplied dimensions and normal capture settings; existing `onEncodeFrame` callbacks still run on the GUI owner with the native resolution and can postprocess the prepared frame. A nonempty payload is embedded using the existing WebP XMP save-string format; image-based state restoration remains project-owned. Native images do not depend on camera, viewport overlays or preset sizing.
 
 ## Capture Pipeline
 

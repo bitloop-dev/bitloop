@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <bitloop/core/threads.h>
 #include <bitloop/core/types.h>
 #include <bitloop/core/capture_context.h>
@@ -46,8 +47,11 @@ class ProjectWorker
     CaptureContext* capture_context = nullptr; // Owned by GUI or headless host
 
     std::vector<ProjectCommandEvent> project_command_queue;
+    using SnapshotCallback = std::function<void(std::optional<SnapshotFrame>, std::string)>;
+    std::vector<SnapshotCallback> snapshot_requests;
     std::mutex event_queue_mutex;
     std::thread worker_thread;
+    std::atomic<bool> worker_finished = false;
 
     ProjectBase* current_project = nullptr;
 
@@ -69,6 +73,8 @@ protected:
     void populateOverlay();
 
     void onEncodeFrame(EncodeFrame& data, int request_id, const CapturePreset& preset);
+    void requestSnapshot(SnapshotCallback callback);
+    void prepareSnapshots();
 
 public:
 

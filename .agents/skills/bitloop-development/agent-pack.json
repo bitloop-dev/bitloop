@@ -1,14 +1,14 @@
 {
   "compatibility": "Unreleased Scene/Viewport, input, headless and native-resolution snapshot-route guidance; inspect active source or installed headers for version-sensitive APIs. Standalone package validation is deferred until a matching Bitloop release is published.",
   "files": {
-    "SKILL.md": "1d6cb6abdeb25052a0358579a536d3766c544bd3f1be9f18415cca1a0a3b9182",
+    "SKILL.md": "7df081d79456fc58ba22eeee85765a3ccf541c260a5a1c32c349c45708a55ce0",
     "agents/openai.yaml": "3731688d06e3e9931c9434b59de2e83507e6d0f7fa7395cc949d836819205e38",
     "assets/health_probe_support.hpp": "ea4f43576865133063551ae1ecea6a1dcec15b05261423065f5a94056ccd2674",
     "references/advanced-project-workflow.md": "f4710090c6f0377d7aa03fc720dcd27d6ecbdc16744e53b2e6ff1edc15a22af5",
     "references/assets-data.md": "7a68e837031e242c15b71826ec5f105a2e4329853ca9e03a757271b27a892728",
-    "references/build-cmake.md": "502645168955410d92890f6a5cc3050164d79d7e5bd197194e67dd07ffb87b2d",
+    "references/build-cmake.md": "1938b8906a6069983cd8166a4d53f931480a290cd6d60cb0450b633db5cae6c4",
     "references/camera-viewport.md": "baceb0c1ec12b0d9c92ad04e7a09b1af544918ec9c96f7fcbf13d3d4e08a70fa",
-    "references/checkpoints-snapshots.md": "7bccc70309403781779e7868df325f8b8c65ee7702974004180e012ec429a198",
+    "references/checkpoints-snapshots.md": "534cb4d114b7912e7c156ad737d090e77db5c1d039749ddf2da946cbe29c8fa3",
     "references/configure-build-run.md": "f7fe7a0e4cc2c11f36e8855e886c85d189d6691f4dd7653795b879ccb3b136b9",
     "references/drawing.md": "03b0b7642dfbda3873e793c903175d1ad98b4b9f91cd6e746030e7ab45b3faba",
     "references/framework-map.md": "d146890045ae6f81588f1bbdbd33df3c14a291708c31ab56b179b62f04c9c332",
@@ -26,7 +26,7 @@
     "scripts/health_session.py": "18c3875ef49f45966887749f983ca4031fb65561e7038d811bc6f23d9bb29ca7"
   },
   "pack_name": "bitloop-development",
-  "pack_revision": "2026.10.15.1",
+  "pack_revision": "2026.10.26.1",
   "schema_version": 1,
   "source_revision": "bitloop-agent-pack-v1"
 }

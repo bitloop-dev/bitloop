@@ -1,0 +1,22 @@
+diff --git a/src/dawn/native/d3d12/ShaderModuleD3D12.cpp b/src/dawn/native/d3d12/ShaderModuleD3D12.cpp
+--- a/src/dawn/native/d3d12/ShaderModuleD3D12.cpp
++++ b/src/dawn/native/d3d12/ShaderModuleD3D12.cpp
+@@ -28,6 +28,7 @@
+ 
+ #include "dawn/native/d3d12/ShaderModuleD3D12.h"
+ 
++#include <algorithm>
+ #include <string>
+ #include <unordered_map>
+ #include <utility>
+@@ -303,6 +304,10 @@ ResultOrError<d3d::CompiledShader> ShaderModule::Compile(
+         }
+     }
+ 
++    // Binding iteration is unordered; this set-like vector must have a stable cache key.
++    std::sort(bindings.ignored_by_robustness_transform.begin(),
++              bindings.ignored_by_robustness_transform.end());
++
+     req.hlsl.shaderModuleHash = GetHash();
+     req.hlsl.inputProgram = UnsafeUnserializedValue(UseTintProgram());
+     req.hlsl.entryPointName = programmableStage.entryPoint.c_str();

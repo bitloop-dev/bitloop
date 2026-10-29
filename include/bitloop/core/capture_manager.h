@@ -186,6 +186,13 @@ struct EncodeFrame
 
 class CaptureManager;
 
+// Immutable image supplied by a simulation owner; RGBA8 pixels are top-row first.
+struct SnapshotFrame
+{
+    IVec2 resolution{0, 0};
+    EncodeFrame frame;
+};
+
 #if BITLOOP_FFMPEG_ENABLED
 class FFmpegWorker
 {
@@ -353,6 +360,7 @@ public:
     // ────── [start capture] => [encode frames] => [finalize capture] ──────
 
     bool startCapture(CaptureConfig _config);
+    void failCapture() { onFinalized(true); }
     bool encodeFrame(const EncodeFrame& frame);
     void finalizeCapture();
 

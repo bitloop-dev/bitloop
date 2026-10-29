@@ -366,5 +366,7 @@ set(VCPKG_MANIFEST_INSTALL ON CACHE BOOL "" FORCE)
 
 
 # Finally, load vcpkg toolchain
+list(APPEND VCPKG_OVERLAY_PORTS "${_project_dir}/templates/default/tooling/ports")
+list(REMOVE_DUPLICATES VCPKG_OVERLAY_PORTS)
 #message(STATUS "Using vcpkg at: ${_vcpkg_dir}")
 include("${_vcpkg_dir}/scripts/buildsystems/vcpkg.cmake")

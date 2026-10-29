@@ -753,6 +753,9 @@ function(bl_merge_vcpkg_manifests)
       set(_first FALSE) 
   endif()
   string(APPEND _out "\"dependencies\":${_deps_union_json}")
+  if(_root_features)
+    string(APPEND _out ",\"features\":${_root_features}")
+  endif()
 
   string(APPEND _out ",\"configuration\":${_merged_cfg_json}")
 

@@ -758,8 +758,12 @@ bool WebPWorker::finalize(CaptureManager* capture_manager)
 
     if (config.format == CaptureFormat::WEBP_SNAPSHOT)
     {
-        if (!config.save_payload.empty())
-            webp_set_save_string_as_xmp_inplace(encoded_data, config.save_payload);
+        if (!config.save_payload.empty() &&
+            !webp_set_save_string_as_xmp_inplace(encoded_data, config.save_payload))
+        {
+            capture_manager->onFinalized(true);
+            return false;
+        }
 
         std::lock_guard<std::mutex> lock(capture_manager->encoded_data_mutex);
         capture_manager->encoded_data = std::move(encoded_data);
@@ -863,8 +867,8 @@ void CaptureManager::onFinalized(bool error)
     // Encoder no longer busy
     encoder_busy.store(false, std::memory_order_release);
 
-    any_capture_complete.store(true, std::memory_order_release);
     capture_error.store(error, std::memory_order_release);
+    any_capture_complete.store(true, std::memory_order_release);
     clearFinalizeRequest();
 
     frame_count = 0;

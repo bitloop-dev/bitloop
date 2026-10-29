@@ -6,6 +6,10 @@ include(CTest)
 
 message(STATUS "Loading tests...")
 
+if(TARGET bitloop::webgpu)
+    add_subdirectory(webgpu)
+endif()
+
 file(GLOB UTILITY_TESTS CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/unit/utility/*.cpp"
 )

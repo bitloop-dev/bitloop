@@ -15,15 +15,15 @@ void ProjectWorker::startWorker()
 
 ProjectWorker::~ProjectWorker()
 {
-    BL_TAKE_OWNERSHIP("live");
-
     if (shared_sync.project_thread_started)
     {
-        // Kill worker thread
+        // Owner-thread teardown can wait for deferred GL cleanup on the GUI thread.
+        while (!worker_finished.load(std::memory_order_acquire))
+        {
+            main_window()->threadQueue().pump();
+            std::this_thread::yield();
+        }
         worker_thread.join();
-
-        // Clean up (TODO: ensure destruction happens on worker thread?)
-        _destroyActiveProject();
     }
 }
 
@@ -70,7 +70,9 @@ void ProjectWorker::handleProjectCommands(ProjectCommandEvent& e)
             &project_log,
             capture_context);
 
-        main_window()->queueMainWindowCommand({ MainWindowCommandType::ON_SELECT_PROJECT });
+        main_window()->queueMainWindowCommand({
+            MainWindowCommandType::ON_SELECT_PROJECT,
+            current_project->getProjectInfo()->name });
     }
     break;
 
@@ -176,7 +178,7 @@ void ProjectWorker::worker_loop()
                 }
 
                 // Capture by default unless sim overrides flag (only has an affect when recording)
-                if (!current_project->paused)
+                if (!current_project->paused || capture_context->isSnapshotting())
                     capture_context->captureFrame(true);
 
                 current_project->invokeScheduledCalls();
@@ -204,6 +206,8 @@ void ProjectWorker::worker_loop()
                 //blPrint() << "";
             }
         }
+
+        prepareSnapshots();
 
         // If recording, don't wake GUI until capture_manager is ready to encode a new frame,
         // otherwise the main GUI thread would need to block while it waits for the last frame to encode.
@@ -244,6 +248,14 @@ void ProjectWorker::worker_loop()
         if (current_project)
             current_project->_onEndFrame();
     }
+
+    {
+        // The GUI may still be finishing its last frame while pumping cleanup.
+        // Exclude UI population throughout teardown, as project commands do.
+        std::lock_guard<std::mutex> shadow_lock(shared_sync.shadow_buffer_mutex);
+        _destroyActiveProject();
+    }
+    worker_finished.store(true, std::memory_order_release);
 }
 
 void ProjectWorker::pushDataToShadow()
@@ -327,6 +339,42 @@ void ProjectWorker::onEncodeFrame(EncodeFrame& data, int request_id, const Captu
 {
     if (current_project)
         current_project->_onEncodeFrame(data, request_id, preset);
+}
+
+void ProjectWorker::requestSnapshot(SnapshotCallback callback)
+{
+    std::lock_guard lock(command_mutex);
+    snapshot_requests.push_back(std::move(callback));
+}
+
+void ProjectWorker::prepareSnapshots()
+{
+    std::vector<SnapshotCallback> requests;
+    {
+        std::lock_guard lock(command_mutex);
+        requests.swap(snapshot_requests);
+    }
+    for (auto& callback : requests)
+    {
+        std::optional<SnapshotFrame> snapshot;
+        std::string error;
+        try
+        {
+            if (!current_project || !current_project->started)
+                throw std::runtime_error("The project stopped before its snapshot was captured");
+            SnapshotFrame output;
+            if (current_project->captureSnapshot(output)) snapshot = std::move(output);
+        }
+        catch (const std::exception& exception)
+        {
+            error = exception.what();
+        }
+        main_window()->threadQueue().post(
+            [callback = std::move(callback), snapshot = std::move(snapshot), error = std::move(error)]() mutable
+            {
+                callback(std::move(snapshot), std::move(error));
+            });
+    }
 }
 
 void ProjectWorker::_onEvent(const EventData& e)

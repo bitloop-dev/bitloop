@@ -13,5 +13,8 @@
         "fltx"
       ]
     }
+  ],
+  "overlay-ports": [
+    "templates/default/tooling/ports"
   ]
 }

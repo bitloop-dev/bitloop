@@ -1,0 +1,42 @@
+--- a/third_party/CMakeLists.txt
++++ b/third_party/CMakeLists.txt
+@@ -229,6 +229,12 @@
+ endfunction()
+ 
+ function(AddSubdirectoryDXC)
++    if(WIN32)
++        find_package(directx-dxc CONFIG REQUIRED)
++        set_property(TARGET Microsoft::DirectXShaderCompiler Microsoft::DXIL PROPERTY IMPORTED_GLOBAL TRUE)
++        add_library(dxcompiler ALIAS Microsoft::DirectXShaderCompiler)
++        return()
++    endif()
+     # We use a CMake function so that all these (non-cache) variables are scoped
+     # only to this function.
+     set(HLSL_OPTIONAL_PROJS_IN_DEFAULT OFF)
+--- a/src/dawn/native/CMakeLists.txt
++++ b/src/dawn/native/CMakeLists.txt
+@@ -938,7 +938,6 @@
+     if (DAWN_USE_BUILT_DXC)
+         target_compile_definitions(dawn_native PRIVATE "DAWN_USE_BUILT_DXC")
+         target_compile_definitions(dawn_native_objects PRIVATE "DAWN_USE_BUILT_DXC")
+-        add_dependencies(dawn_native copy_dxil_dll)
+     endif()
+ endif()
+ 
+--- a/src/cmake/DawnConfig.cmake.in
++++ b/src/cmake/DawnConfig.cmake.in
+@@ -36,4 +36,14 @@
+ 
+ find_dependency(absl CONFIG)
+ 
++if(@DAWN_USE_BUILT_DXC@ AND WIN32 AND NOT TARGET Microsoft::DirectXShaderCompiler)
++    find_dependency(directx-dxc CONFIG REQUIRED)
++endif()
+ include ("${CMAKE_CURRENT_LIST_DIR}/DawnTargets.cmake")
++if(@DAWN_USE_BUILT_DXC@ AND WIN32)
++    get_target_property(_dxc Microsoft::DirectXShaderCompiler IMPORTED_LOCATION_RELEASE)
++    get_filename_component(_dxc_dir "${_dxc}" DIRECTORY)
++    set_property(TARGET dawn::webgpu_dawn PROPERTY DAWN_RUNTIME_FILES "${_dxc_dir}/dxcompiler.dll;${_dxc_dir}/dxil.dll")
++    unset(_dxc)
++    unset(_dxc_dir)
++endif()

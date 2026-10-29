@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mutex>
+#include <optional>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -67,6 +68,7 @@ class CaptureContext
 
     CapturePreprocessor preprocessor;
     EncodeFrame preprocessed_frame;
+    std::optional<SnapshotFrame> prepared_snapshot; // GUI-owned; delivered from the worker queue.
     bool use_preprocessor_texture = false;
 
 public:

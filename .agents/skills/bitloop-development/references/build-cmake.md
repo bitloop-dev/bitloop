@@ -32,6 +32,15 @@ Project tooling selects Bitloop once for the opened root:
 
 Workspace markers select the shared vcpkg/cache and candidate source location. Manifest discovery is separate: it starts at the opened root and follows only enabled `bitloop_add_dependency(...)` edges. Source mode removes only the `bitloop` port from the generated union and adds the framework source manifest; checked-in project manifests remain unchanged.
 
+Optional WebGPU consumers request `{ "name": "bitloop", "features": ["webgpu"] }`
+in their own manifest and link `bitloop::webgpu`. Current managed tooling retains
+the feature's dependencies in source mode and selects `BITLOOP_WITH_WEBGPU`.
+Do not duplicate Dawn/backend dependencies in consumer manifests. Refresh the
+opened root's tooling after upgrading this support. Call
+`bitloop_deploy_webgpu_runtime(<executable>)` for GPU executables; nested project
+libraries leave deployment to their parent executable. Plain `bitloop` remains
+independent of Dawn. See `docs/webgpu.md` for the pinned Dawn overlay requirement.
+
 Prefer Bitloop and standard C++ capabilities when they fit. Ask before adding a dependency that broadens architecture, ownership, or long-term maintenance for speculative benefit.
 
 Typical project-local wiring after `bitloop_finalize()` is:
